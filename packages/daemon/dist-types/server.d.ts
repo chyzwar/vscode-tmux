@@ -39,6 +39,8 @@ export declare class DaemonServer {
     flush(): Promise<void>;
     private require;
     private onHello;
+    /** Make sure the workspace's tmux session exists (it may have been killed behind our back). */
+    private ensureSession;
     private onFocus;
     private scheduleShow;
     private enqueueShow;

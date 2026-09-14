@@ -144,6 +144,17 @@ describe('DaemonServer', () => {
     expect(sent[0]).toMatchObject({ type: 'result', id: 'c9', ok: false });
   });
 
+  it('recreates a session that disappeared before showing it', async () => {
+    const { server, calls, sessions, shown } = setup();
+    const { conn } = fakeConn();
+    await server.handle(conn, hello('abcdef0123456789', '/w/project-a'));
+    sessions.delete('project-a-abcdef01'); // killed behind our back (tmux kill-session)
+    await server.handle(conn, { type: 'focus', workspaceId: 'abcdef0123456789', focused: true });
+    await server.flush();
+    expect(calls.filter((c) => c.startsWith('create:'))).toHaveLength(2);
+    expect(shown).toEqual(['project-a-abcdef01']);
+  });
+
   it('disconnect detaches the workspace', async () => {
     const { server } = setup();
     const { conn, sent } = fakeConn();

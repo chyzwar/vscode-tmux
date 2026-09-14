@@ -32,7 +32,7 @@ export class DaemonServer {
                     return await this.onCreateTerminal(conn, msg);
                 case 'showSession': {
                     const rec = this.require(msg.workspaceId);
-                    this.scheduleShow(rec.sessionName, 0);
+                    this.scheduleShow(msg.workspaceId, 0);
                     return this.reply(conn, msg.id, { sessionName: rec.sessionName });
                 }
                 case 'open':
@@ -70,9 +70,9 @@ export class DaemonServer {
     async flush() {
         if (this.pendingShow) {
             clearTimeout(this.pendingShow.timer);
-            const { session } = this.pendingShow;
+            const { workspaceId } = this.pendingShow;
             this.pendingShow = undefined;
-            this.enqueueShow(session);
+            this.enqueueShow(workspaceId);
         }
         await this.showQueue;
     }
@@ -87,20 +87,20 @@ export class DaemonServer {
         const record = { workspaceId: msg.workspaceId, folder: msg.folder, workspaceFile: msg.workspaceFile, name: msg.name, sessionName };
         this.registry.upsert(record);
         this.registry.attach(msg.workspaceId, conn);
-        await this.o.backend.ensureServer();
-        let created = false;
-        if (!(await this.o.backend.hasSession(sessionName))) {
-            await this.o.backend.createSession({ name: sessionName, cwd: msg.folder, env: this.o.sessionEnv(msg.workspaceId, msg.folder), firstTabName: 'Shell' });
-            created = true;
-            this.o.log(`created session ${sessionName} for ${msg.folder}`);
-        }
-        else {
-            this.o.log(`reattached session ${sessionName} for ${msg.folder}`);
-        }
+        const created = await this.ensureSession(record);
+        this.o.log(`${created ? 'created' : 'reattached'} session ${sessionName} for ${msg.folder}`);
         await this.snapshot(msg.workspaceId);
         this.reply(conn, msg.id, { sessionName, created });
         if (msg.focused)
-            this.scheduleShow(sessionName, 0);
+            this.scheduleShow(msg.workspaceId, 0);
+    }
+    /** Make sure the workspace's tmux session exists (it may have been killed behind our back). */
+    async ensureSession(rec) {
+        await this.o.backend.ensureServer();
+        if (await this.o.backend.hasSession(rec.sessionName))
+            return false;
+        await this.o.backend.createSession({ name: rec.sessionName, cwd: rec.folder, env: this.o.sessionEnv(rec.workspaceId, rec.folder), firstTabName: 'Shell' });
+        return true;
     }
     onFocus(workspaceId, focused) {
         if (!focused)
@@ -110,32 +110,38 @@ export class DaemonServer {
             this.o.log(`focus for unknown workspace ${workspaceId}`);
             return;
         }
-        this.scheduleShow(rec.sessionName, this.focusDebounceMs);
+        this.scheduleShow(workspaceId, this.focusDebounceMs);
     }
-    scheduleShow(session, delayMs) {
+    scheduleShow(workspaceId, delayMs) {
         if (this.pendingShow)
             clearTimeout(this.pendingShow.timer);
         const timer = setTimeout(() => {
             this.pendingShow = undefined;
-            this.enqueueShow(session);
+            this.enqueueShow(workspaceId);
         }, delayMs);
         timer.unref();
-        this.pendingShow = { session, timer };
+        this.pendingShow = { workspaceId, timer };
     }
-    enqueueShow(session) {
+    enqueueShow(workspaceId) {
         this.showQueue = this.showQueue
-            .then(() => this.o.presenter.show(session))
-            .catch((err) => this.o.log(`presenter.show(${session}) failed: ${err.message}`));
+            .then(async () => {
+            const rec = this.require(workspaceId);
+            if (await this.ensureSession(rec))
+                this.o.log(`recreated missing session ${rec.sessionName}`);
+            await this.o.presenter.show(rec.sessionName);
+        })
+            .catch((err) => this.o.log(`show(${workspaceId}) failed: ${err.message}`));
     }
     async onCreateTerminal(conn, msg) {
         const rec = this.require(msg.workspaceId);
+        await this.ensureSession(rec);
         const existing = await this.o.backend.listTabs(rec.sessionName);
         const name = msg.name?.trim() || `Terminal ${existing.length + 1}`;
         const tab = await this.o.backend.newTab(rec.sessionName, { name, cwd: msg.cwd ?? rec.folder, command: msg.command });
         await this.o.backend.selectTab(rec.sessionName, tab.id);
         await this.snapshot(msg.workspaceId, msg.command ? { name, command: msg.command } : undefined);
         this.reply(conn, msg.id, { tab });
-        this.scheduleShow(rec.sessionName, 0);
+        this.scheduleShow(msg.workspaceId, 0);
     }
     async onOpen(conn, msg) {
         const input = { cwd: msg.cwd, target: msg.target };
