@@ -128,11 +128,23 @@ else
   warn "'code' not on PATH; install the extension manually: code --install-extension $vsix"
 fi
 
-# 8. Restart a running daemon so it picks up the new build ----------------------
+# 8. (Re)start the daemon on the new build --------------------------------------
+unit="vscode-tmux-$(id -u)"
 if [[ -S "/run/user/$(id -u)/vscode-tmux.sock" ]]; then
-  log "restarting running daemon"
-  systemctl --user stop "vscode-tmux-$(id -u).service" 2>/dev/null || pkill -f '[c]li.mjs daemon' || true
+  log "stopping running daemon"
+  systemctl --user stop "$unit.service" 2>/dev/null || pkill -f '[c]li.mjs daemon' || true
+  sleep 1
 fi
+node_bin="$(command -v node)"
+if command -v systemd-run >/dev/null && systemd-run --user --collect --quiet --unit="$unit" --setenv=PATH="$PATH" "$node_bin" "$REPO/packages/daemon/dist/cli.mjs" daemon 2>/dev/null; then
+  log "daemon started as transient user unit $unit"
+else
+  nohup "$node_bin" "$REPO/packages/daemon/dist/cli.mjs" daemon >/dev/null 2>&1 &
+  disown
+  log "daemon started (detached)"
+fi
+sleep 2
+"$HOME/.local/bin/vscode-tmux" status >/dev/null && log "daemon answers on $(id -u)'s socket" || warn "daemon did not answer; check ~/.local/state/vscode-tmux/daemon.log"
 
 cat <<EOF
 
