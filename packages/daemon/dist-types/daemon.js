@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { TmuxBackend } from './backend/tmux.js';
 import { scrubEnv } from '@vscode-tmux/protocol';
@@ -10,6 +10,7 @@ import { Registry } from './registry.js';
 import { GhosttyPresenter } from './presenter/ghostty.js';
 import { GHOSTTY_CLASS, LOBBY_SESSION, TMUX_SOCKET_NAME, configDir, socketPath, stateDir } from './paths.js';
 import { DaemonServer } from './server.js';
+import { ghosttyEnvFor, loadSettings } from './settings.js';
 import { AlreadyRunningError, listen } from './transport.js';
 /** Composition root: wires backend, presenter, opener and server, then listens. */
 export async function runDaemon(o = {}) {
@@ -20,18 +21,25 @@ export async function runDaemon(o = {}) {
     const sock = socketPath();
     const tmuxConfig = join(configDir(), 'tmux.conf');
     const ghosttyConfig = join(configDir(), 'ghostty.conf');
+    const settings = loadSettings(join(configDir(), 'config.json'));
+    log(`settings: ${JSON.stringify(settings)}`);
     const backend = new TmuxBackend({ exec: realExec, socketName: TMUX_SOCKET_NAME, configPath: tmuxConfig, env });
     const presenter = new GhosttyPresenter({
         backend,
-        env,
+        env: { ...env, ...ghosttyEnvFor(settings) },
+        timeoutMs: settings.ghosttyStartTimeoutMs,
         configPath: ghosttyConfig,
         appClass: GHOSTTY_CLASS,
         lobbySession: LOBBY_SESSION,
         spawn: (cmd, args, spawnEnv) => {
             log(`launching ${cmd} ${args.join(' ')}`);
-            const child = spawn(cmd, args, { env: spawnEnv, detached: true, stdio: 'ignore' });
+            // Keep Ghostty's own stderr: it is the only place GTK/Wayland startup errors show up.
+            const out = openSync(join(dir, 'ghostty.log'), 'a');
+            const child = spawn(cmd, args, { env: spawnEnv, detached: true, stdio: ['ignore', out, out] });
             child.on('error', (err) => log(`failed to launch ${cmd}: ${err.message}`));
+            child.on('exit', (code, signal) => log(`${cmd} exited code=${code} signal=${signal}`));
             child.unref();
+            closeSync(out);
         },
     });
     const registry = new Registry();

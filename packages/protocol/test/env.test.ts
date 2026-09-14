@@ -4,7 +4,7 @@ import { scrubEnv } from '../src/env.js';
 describe('scrubEnv', () => {
   it('drops editor/terminal nesting variables', () => {
     const out = scrubEnv({ TMUX: '/tmp/x', TMUX_PANE: '%1', TERM_PROGRAM: 'vscode', VSCODE_PID: '1', GHOSTTY_RESOURCES_DIR: '/r', PATH: '/usr/bin' });
-    expect(out).toEqual({ PATH: '/usr/bin', LANG: 'C.UTF-8' });
+    expect(out).toEqual({ PATH: '/usr/bin:/usr/local/bin:/bin:/snap/bin', LANG: 'C.UTF-8' });
   });
 
   it('removes variables that point into the VS Code snap and their _VSCODE_SNAP_ORIG companions', () => {
@@ -18,7 +18,7 @@ describe('scrubEnv', () => {
       XDG_CONFIG_DIRS: '/etc/xdg',
       LANG: 'en_US.UTF-8',
     });
-    expect(out).toEqual({ XDG_DATA_DIRS: '/usr/share:/usr/local/share', XDG_CONFIG_DIRS: '/etc/xdg', LANG: 'en_US.UTF-8' });
+    expect(out).toEqual({ XDG_DATA_DIRS: '/usr/share:/usr/local/share', XDG_CONFIG_DIRS: '/etc/xdg', LANG: 'en_US.UTF-8', PATH: '/usr/local/bin:/usr/bin:/bin:/snap/bin' });
   });
 
   it('keeps desktop session variables and PATH entries outside the snap', () => {
@@ -40,7 +40,14 @@ describe('scrubEnv', () => {
       HOME: '/h',
       SHELL: '/bin/zsh',
       LC_ALL: 'C',
-      PATH: '/home/u/.local/bin:/usr/bin',
+      PATH: '/home/u/.local/bin:/usr/bin:/h/.local/bin:/usr/local/bin:/bin:/snap/bin',
     });
+  });
+});
+
+describe('withStandardDirs', () => {
+  it('appends missing standard dirs once, keeping order', async () => {
+    const { withStandardDirs } = await import('../src/env.js');
+    expect(withStandardDirs('/snap/bin:/opt/x', '/h')).toBe('/snap/bin:/opt/x:/h/.local/bin:/usr/local/bin:/usr/bin:/bin');
   });
 });

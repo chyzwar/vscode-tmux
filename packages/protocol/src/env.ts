@@ -32,5 +32,14 @@ export function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     out[k] = v;
   }
   if (!out.LANG && !out.LC_ALL) out.LANG = 'C.UTF-8';
+  out.PATH = withStandardDirs(out.PATH ?? '', out.HOME ?? env.HOME);
   return out;
+}
+
+/** Guarantee the directories where ghostty, tmux, xdotool and code usually live are on PATH. */
+export function withStandardDirs(path: string, home: string | undefined): string {
+  const parts = path.split(':').filter(Boolean);
+  const std = [...(home ? [`${home}/.local/bin`] : []), '/usr/local/bin', '/usr/bin', '/bin', '/snap/bin'];
+  for (const d of std) if (!parts.includes(d)) parts.push(d);
+  return parts.join(':');
 }
