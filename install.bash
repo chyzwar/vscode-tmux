@@ -102,9 +102,9 @@ yarn build
 
 # 5. CLI symlinks ------------------------------------------------------------
 mkdir -p "$HOME/.local/bin"
-ln -sfn "$REPO/packages/daemon/dist/cli.js" "$HOME/.local/bin/vscode-tmux"
+ln -sfn "$REPO/packages/daemon/dist/cli.mjs" "$HOME/.local/bin/vscode-tmux"
 ln -sfn "$REPO/packages/daemon/bin/vscode" "$HOME/.local/bin/vscode"
-chmod +x "$REPO/packages/daemon/dist/cli.js" "$REPO/packages/daemon/bin/vscode"
+chmod +x "$REPO/packages/daemon/dist/cli.mjs" "$REPO/packages/daemon/bin/vscode"
 log "linked ~/.local/bin/vscode-tmux and ~/.local/bin/vscode"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "~/.local/bin is not on your PATH" ;; esac
 
@@ -131,7 +131,7 @@ fi
 # 8. Restart a running daemon so it picks up the new build ----------------------
 if [[ -S "/run/user/$(id -u)/vscode-tmux.sock" ]]; then
   log "restarting running daemon"
-  systemctl --user stop "vscode-tmux-$(id -u).service" 2>/dev/null || pkill -f 'cli.js daemon' || true
+  systemctl --user stop "vscode-tmux-$(id -u).service" 2>/dev/null || pkill -f '[c]li.mjs daemon' || true
 fi
 
 cat <<EOF

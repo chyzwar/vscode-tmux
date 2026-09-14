@@ -6,9 +6,9 @@ await build({
   platform: 'node',
   target: 'esnext',
   format: 'esm',
-  outfile: 'dist/cli.js',
+  outfile: 'dist/cli.mjs',
   banner: { js: '#!/usr/bin/env node' },
   sourcemap: 'inline',
   logLevel: 'info',
 });
-chmodSync('dist/cli.js', 0o755);
+chmodSync('dist/cli.mjs', 0o755);

@@ -24,5 +24,12 @@ export interface ListenOptions {
     onConnection: (conn: SocketConnection) => void;
     onDisconnect: (conn: SocketConnection) => void;
 }
-/** Listen on a Unix socket, replacing a stale socket file when nothing answers on it. */
+/**
+ * Listen on a Unix socket. Several daemons may start at once (one per VS Code
+ * window); exactly one must win. A stale socket file is removed, ENOENT/EADDRINUSE
+ * races are retried, and if another daemon answers on the path we give up with
+ * `AlreadyRunningError`.
+ */
+export declare class AlreadyRunningError extends Error {
+}
 export declare function listen(o: ListenOptions): Promise<Server>;

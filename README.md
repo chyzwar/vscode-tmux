@@ -37,7 +37,7 @@ cd ~/MyProjects/vscode-tmux
 
 Options: `--no-apt`, `--no-vscode-deb`, `--force-config`. Then reload your VS Code windows.
 
-Manual equivalent: `yarn install && yarn build`, symlink `packages/daemon/dist/cli.js` to `~/.local/bin/vscode-tmux` and `packages/daemon/bin/vscode` to `~/.local/bin/vscode`, copy `config/*.conf` to `~/.config/vscode-tmux/`, `code --install-extension packages/extension/vscode-tmux.vsix`.
+Manual equivalent: `yarn install && yarn build`, symlink `packages/daemon/dist/cli.mjs` to `~/.local/bin/vscode-tmux` and `packages/daemon/bin/vscode` to `~/.local/bin/vscode`, copy `config/*.conf` to `~/.config/vscode-tmux/`, `code --install-extension packages/extension/vscode-tmux.vsix`.
 
 ## Use
 
@@ -59,7 +59,7 @@ Manual equivalent: `yarn install && yarn build`, symlink `packages/daemon/dist/c
 yarn test          # vitest (unit + a real-tmux integration test if tmux is installed)
 yarn typecheck
 yarn build
-node packages/daemon/dist/cli.js daemon --foreground
+node packages/daemon/dist/cli.mjs daemon --foreground
 ```
 
 Layout: `packages/protocol` (messages, NDJSON codec, env scrubbing), `packages/daemon` (backend, presenter, opener, server, CLI), `packages/extension` (VS Code extension), `config/` (tmux and Ghostty instance configs), `docs/` (ADR, research, plans).

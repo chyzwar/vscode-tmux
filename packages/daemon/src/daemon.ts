@@ -10,7 +10,7 @@ import { Registry } from './registry.js';
 import { GhosttyPresenter } from './presenter/ghostty.js';
 import { GHOSTTY_CLASS, LOBBY_SESSION, TMUX_SOCKET_NAME, configDir, socketPath, stateDir } from './paths.js';
 import { DaemonServer } from './server.js';
-import { listen, type SocketConnection } from './transport.js';
+import { AlreadyRunningError, listen, type SocketConnection } from './transport.js';
 
 export interface DaemonOptions {
   foreground?: boolean;
@@ -60,13 +60,21 @@ export async function runDaemon(o: DaemonOptions = {}): Promise<void> {
   });
 
   await backend.ensureServer();
-  await listen({
-    socketPath: sock,
-    onConnection: (conn: SocketConnection) => {
-      conn.onMessage((msg) => void server.handle(conn, msg));
-    },
+  try {
+    await listen({
+      socketPath: sock,
+      onConnection: (conn: SocketConnection) => {
+        conn.onMessage((msg) => void server.handle(conn, msg));
+      },
     onDisconnect: (conn) => server.disconnected(conn),
-  });
+    });
+  } catch (err) {
+    if (err instanceof AlreadyRunningError) {
+      log(`another daemon already owns ${sock}; exiting`);
+      return;
+    }
+    throw err;
+  }
   process.on('SIGHUP', () => log('ignoring SIGHUP'));
   process.on('SIGTERM', () => {
     log('SIGTERM: exiting');

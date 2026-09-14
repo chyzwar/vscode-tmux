@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { runDaemon } from './daemon.js';
+import { computeWorkspaceId } from './ids.js';
 import { socketPath } from './paths.js';
 import { tryConnect } from './transport.js';
 const USAGE = `vscode-tmux — VS Code ⇄ Ghostty/tmux companion
@@ -9,6 +11,7 @@ Usage:
   vscode-tmux daemon [--foreground]   run the daemon (normally auto-started by the extension)
   vscode-tmux open <target>           open path[:line[:col]] in this terminal's VS Code window
   vscode-tmux new [name] [-- cmd...]  create a terminal tab in this terminal's workspace
+  vscode-tmux show [path]             show the session of the workspace at path (default: cwd) in Ghostty
   vscode-tmux list                    list workspaces, sessions and tabs
   vscode-tmux status                  daemon / tmux / Ghostty status
 
@@ -77,6 +80,13 @@ async function newTab(args) {
     if (!reply.ok)
         fail(reply.error ?? 'createTerminal failed');
 }
+async function show(args) {
+    const workspaceId = args[0] ? await computeWorkspaceId(resolve(args[0])) : (process.env.VSCODE_TMUX_WORKSPACE_ID ?? (await computeWorkspaceId(process.cwd())));
+    const reply = await request({ type: 'showSession', id: randomUUID(), workspaceId });
+    if (!reply.ok)
+        fail(reply.error ?? 'showSession failed');
+    process.stdout.write(`showing ${reply.data.sessionName}\n`);
+}
 async function list() {
     const reply = await request({ type: 'list', id: randomUUID() });
     if (!reply.ok)
@@ -112,6 +122,8 @@ async function main(argv) {
             return open(rest);
         case 'new':
             return newTab(rest);
+        case 'show':
+            return show(rest);
         case 'list':
             return list();
         case 'status':

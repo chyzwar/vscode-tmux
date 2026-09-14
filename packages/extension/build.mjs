@@ -12,4 +12,4 @@ await build({
   logLevel: 'info',
 });
 mkdirSync('dist', { recursive: true });
-copyFileSync('../daemon/dist/cli.js', 'dist/cli.js');
+copyFileSync('../daemon/dist/cli.mjs', 'dist/cli.mjs');

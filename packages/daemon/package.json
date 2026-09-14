@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": "./dist/cli.js",
+  "bin": "./dist/cli.mjs",
   "scripts": {
     "build": "node build.mjs"
   },

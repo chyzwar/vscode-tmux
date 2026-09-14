@@ -102,7 +102,10 @@ class Session {
 
   private async connectWithSpawn(): Promise<void> {
     if (await this.tryConnect()) return;
-    const cliJs = join(this.context.extensionPath, 'dist', 'cli.js');
+    // Several windows may notice the missing daemon at once: stagger, then re-check.
+    await new Promise((r) => setTimeout(r, 100 + Math.random() * 400));
+    if (await this.tryConnect()) return;
+    const cliJs = join(this.context.extensionPath, 'dist', 'cli.mjs');
     try {
       const r = spawnDaemon(cliJs, process.env, process.execPath, log);
       log(`spawned daemon: ${r.method}: ${r.command}`);

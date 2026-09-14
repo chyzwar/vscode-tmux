@@ -82,29 +82,55 @@ export function tryConnect(socketPath, timeoutMs = 1000) {
         });
     });
 }
-/** Listen on a Unix socket, replacing a stale socket file when nothing answers on it. */
+/**
+ * Listen on a Unix socket. Several daemons may start at once (one per VS Code
+ * window); exactly one must win. A stale socket file is removed, ENOENT/EADDRINUSE
+ * races are retried, and if another daemon answers on the path we give up with
+ * `AlreadyRunningError`.
+ */
+export class AlreadyRunningError extends Error {
+}
 export async function listen(o) {
-    if (existsSync(o.socketPath)) {
-        const live = await tryConnect(o.socketPath, 500);
-        if (live) {
-            live.close();
-            throw new Error(`another daemon is already listening on ${o.socketPath}`);
+    for (let attempt = 0; attempt < 5; attempt++) {
+        if (existsSync(o.socketPath)) {
+            const live = await tryConnect(o.socketPath, 500);
+            if (live) {
+                live.close();
+                throw new AlreadyRunningError(`another daemon is already listening on ${o.socketPath}`);
+            }
+            try {
+                unlinkSync(o.socketPath);
+            }
+            catch (err) {
+                if (err.code !== 'ENOENT')
+                    throw err;
+            }
         }
-        unlinkSync(o.socketPath);
-    }
-    const server = createServer((socket) => {
-        const conn = new SocketConnection(socket);
-        o.onConnection(conn);
-        socket.on('close', () => o.onDisconnect(conn));
-    });
-    await new Promise((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(o.socketPath, () => {
-            server.off('error', reject);
-            resolve();
+        const server = createServer((socket) => {
+            const conn = new SocketConnection(socket);
+            o.onConnection(conn);
+            socket.on('close', () => o.onDisconnect(conn));
         });
-    });
-    chmodSync(o.socketPath, 0o600);
-    return server;
+        try {
+            await new Promise((resolve, reject) => {
+                server.once('error', reject);
+                server.listen(o.socketPath, () => {
+                    server.off('error', reject);
+                    resolve();
+                });
+            });
+        }
+        catch (err) {
+            server.close();
+            if (err.code === 'EADDRINUSE') {
+                await new Promise((r) => setTimeout(r, 100 + Math.random() * 200));
+                continue;
+            }
+            throw err;
+        }
+        chmodSync(o.socketPath, 0o600);
+        return server;
+    }
+    throw new Error(`could not bind ${o.socketPath} after several attempts`);
 }
 //# sourceMappingURL=transport.js.map

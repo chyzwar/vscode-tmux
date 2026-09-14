@@ -30,6 +30,10 @@ function spawnDaemon(cliJs, baseEnv, electronPath, log) {
         log(`daemon started via systemd-run (${unit})`);
         return { method: 'systemd-run', command: `${node.cmd} ${cliJs} daemon` };
     }
+    if (/already (exists|loaded|active|running)/i.test(systemd.stderr ?? '')) {
+        log(`daemon unit ${unit} already exists (started by another window)`);
+        return { method: 'systemd-run', command: `${node.cmd} ${cliJs} daemon` };
+    }
     log(`systemd-run unavailable (${systemd.stderr?.trim() || systemd.error?.message || 'exit ' + systemd.status}); spawning detached`);
     const child = (0, node_child_process_1.spawn)(node.cmd, [cliJs, 'daemon'], { env: node.env, detached: true, stdio: 'ignore' });
     child.unref();
