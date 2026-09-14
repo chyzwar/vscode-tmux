@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { TmuxBackend } from './backend/tmux.js';
-import { scrubEnv } from './env.js';
+import { scrubEnv } from '@vscode-tmux/protocol';
 import { realExec } from './exec.js';
 import { fileLogger } from './log.js';
 import { Opener } from './opener.js';

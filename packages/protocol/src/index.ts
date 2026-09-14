@@ -143,3 +143,5 @@ function parseLine(line: string): Message | undefined {
   }
   return undefined;
 }
+
+export { scrubEnv } from './env.js';

@@ -1,46 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scrubEnv = scrubEnv;
 exports.resolveNode = resolveNode;
 exports.spawnDaemon = spawnDaemon;
 const node_child_process_1 = require("node:child_process");
-const DROP_PREFIXES = [
-    'VSCODE_',
-    'ELECTRON_',
-    'TERM_PROGRAM',
-    'TMUX',
-    'GHOSTTY_',
-    'SNAP',
-    'CHROME_',
-    'GIO_',
-    'GTK_',
-    'GDK_',
-    'LOCPATH',
-    'GSETTINGS_',
-    'LD_LIBRARY_PATH',
-    'NODE_OPTIONS',
-    'GST_',
-    'FONTCONFIG_',
-    'GI_TYPELIB_PATH',
-    'LIBGL_DRIVERS_PATH',
-    'QT_',
-    'BAMF_',
-    'XDG_DATA_DIRS',
-];
-/** Remove VS Code / Electron / snap specifics so the daemon and its children see a normal desktop env. */
-function scrubEnv(env) {
-    const out = {};
-    for (const [k, v] of Object.entries(env)) {
-        if (v === undefined || k.endsWith('_VSCODE_SNAP_ORIG'))
-            continue;
-        if (DROP_PREFIXES.some((p) => k.startsWith(p)))
-            continue;
-        out[k] = v;
-    }
-    const origDataDirs = env.XDG_DATA_DIRS_VSCODE_SNAP_ORIG;
-    out.XDG_DATA_DIRS = origDataDirs || '/usr/local/share:/usr/share:/var/lib/snapd/desktop';
-    return out;
-}
+const protocol_1 = require("@vscode-tmux/protocol");
 /** Locate a `node` binary the way the user's shell would (nodenv/nvm shims), falling back to Electron-as-node. */
 function resolveNode(env, electronPath) {
     const shell = env.SHELL || '/bin/bash';
@@ -56,7 +19,7 @@ function resolveNode(env, electronPath) {
  * to a detached child with a scrubbed environment.
  */
 function spawnDaemon(cliJs, baseEnv, electronPath, log) {
-    const env = scrubEnv(baseEnv);
+    const env = (0, protocol_1.scrubEnv)(baseEnv);
     const node = resolveNode(env, electronPath);
     const unit = `vscode-tmux-${process.getuid?.() ?? 'user'}`;
     const systemdArgs = ['--user', '--collect', '--quiet', `--unit=${unit}`, `--setenv=PATH=${env.PATH ?? ''}`];
