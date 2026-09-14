@@ -58,6 +58,8 @@ async function open(args: string[]): Promise<void> {
     else process.stderr.write('vscode-tmux: VSCODE_TMUX_WORKSPACE_ID not set; opening in the last active window\n');
     const reply = (await conn.request(msg, 15_000)) as ResultMessage;
     if (!reply.ok) fail(reply.error ?? 'open failed');
+    const d = reply.data as { via: string; raised?: boolean };
+    if (d.via === 'extension' && d.raised === false) process.stderr.write('vscode-tmux: opened, but the window could not be raised\n');
   } finally {
     conn.close();
   }

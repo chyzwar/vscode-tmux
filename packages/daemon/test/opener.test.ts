@@ -15,13 +15,20 @@ function fakeConnection(reply: (m: Message) => Message) {
 
 const ws = { workspaceId: 'abc123', folder: '/w/project-a', name: 'project-a', sessionName: 'project-a-abc123' };
 
-function setup(o: { connected?: boolean; xdotool?: boolean; reply?: (m: Message) => Message } = {}) {
+function setup(o: { connected?: boolean; xdotool?: boolean; reply?: (m: Message) => Message; search?: (args: string[], n: number) => string } = {}) {
   const registry = new Registry();
   registry.upsert(ws);
   const { conn, received } = fakeConnection(o.reply ?? ((m) => ({ type: 'openResult', id: (m as { id: string }).id, ok: true, title: 'App.tsx - project-a - Visual Studio Code' })));
   if (o.connected !== false) registry.attach(ws.workspaceId, conn);
-  const { exec, calls } = fakeExec((cmd, args) => (cmd === 'xdotool' && args[0] === 'search' ? { stdout: '0x100007d\n' } : undefined));
-  const opener = new Opener({ registry, exec, xdotoolAvailable: async () => o.xdotool ?? true });
+  let searches = 0;
+  let focused = '';
+  const { exec, calls } = fakeExec((cmd, args) => {
+    if (cmd === 'xdotool' && args[0] === 'search') return { stdout: o.search ? o.search(args, searches++) : '16777341\n' };
+    if (cmd === 'xdotool' && args[0] === 'windowfocus') focused = args[2]!;
+    if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: `${Number(focused)}\n` };
+    return undefined;
+  });
+  const opener = new Opener({ registry, exec, xdotoolAvailable: async () => o.xdotool ?? true, sleep: async () => {} });
   return { opener, calls, received };
 }
 
@@ -32,7 +39,9 @@ describe('Opener', () => {
     expect(r.via).toBe('extension');
     expect(received[0]).toMatchObject({ type: 'openRequest', path: '/w/project-a/src/App.tsx', line: 42, col: 8 });
     expect(calls[0]).toEqual({ cmd: 'xdotool', args: ['search', '--name', '^App\\.tsx - project-a - Visual Studio Code$'] });
-    expect(calls[1]).toEqual({ cmd: 'xdotool', args: ['windowactivate', '--sync', '0x100007d'] });
+    expect(calls.slice(1).map((c) => c.args[0])).toEqual(['windowactivate', 'windowraise', 'windowfocus', 'getactivewindow']);
+    expect(calls[3]).toEqual({ cmd: 'xdotool', args: ['windowfocus', '--sync', '16777341'] });
+    expect(r.raised).toBe(true);
   });
 
   it('falls back to code --goto for raising when xdotool is missing', async () => {
@@ -70,8 +79,55 @@ describe('Opener', () => {
   });
 });
 
+describe('Opener raise retries', () => {
+  it('retries the exact title search while VS Code updates the window title', async () => {
+    const { opener, calls } = setup({ search: (_a, n) => (n < 2 ? '' : '66\n') });
+    const r = await opener.open({ workspaceId: 'abc123', cwd: '/w/project-a', target: 'src/App.tsx' });
+    expect(r.raised).toBe(true);
+    expect(calls.filter((c) => c.cmd === 'xdotool' && c.args[0] === 'search')).toHaveLength(3);
+    expect(calls.find((c) => c.args[0] === 'windowfocus')).toEqual({ cmd: 'xdotool', args: ['windowfocus', '--sync', '66'] });
+  });
+
+  it('falls back to a workspace-name match when the exact title never appears and exactly one window matches', async () => {
+    const { opener, calls } = setup({ search: (args) => (args[2]!.includes('project-a - ') && !args[2]!.startsWith('^App') ? '77\n' : '') });
+    const r = await opener.open({ workspaceId: 'abc123', cwd: '/w/project-a', target: 'src/App.tsx' });
+    expect(r.raised).toBe(true);
+    expect(calls.find((c) => c.args[0] === 'windowfocus')).toEqual({ cmd: 'xdotool', args: ['windowfocus', '--sync', '77'] });
+  });
+
+  it('uses the code CLI when no window can be identified', async () => {
+    const { opener, calls } = setup({ search: () => '' });
+    const r = await opener.open({ workspaceId: 'abc123', cwd: '/w/project-a', target: 'src/App.tsx' });
+    expect(r.raised).toBe(true); // code CLI exit 0
+    expect(calls.at(-1)).toEqual({ cmd: 'code', args: ['/w/project-a', '--goto', '/w/project-a/src/App.tsx'] });
+  });
+
+  it('does not use an ambiguous workspace-name match', async () => {
+    const { opener, calls } = setup({ search: (args) => (args[2]!.startsWith('^App') ? '' : '1\n2\n') });
+    await opener.open({ workspaceId: 'abc123', cwd: '/w/project-a', target: 'src/App.tsx' });
+    expect(calls.at(-1)?.cmd).toBe('code');
+  });
+});
+
 describe('escapeRegex', () => {
   it('escapes regex metacharacters', () => {
     expect(escapeRegex('a.b*c (d) [e] {f} + ? ^ $ | \\')).toBe('a\\.b\\*c \\(d\\) \\[e\\] \\{f\\} \\+ \\? \\^ \\$ \\| \\\\');
+  });
+});
+
+describe('Opener when the window never becomes active', () => {
+  it('falls back to the code CLI', async () => {
+    const registry = new Registry();
+    registry.upsert(ws);
+    const { conn } = fakeConnection((m) => ({ type: 'openResult', id: (m as { id: string }).id, ok: true, title: 'T' }));
+    registry.attach(ws.workspaceId, conn);
+    const { exec, calls } = fakeExec((cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'search') return { stdout: '5\n' };
+      if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: '9\n' };
+      return undefined;
+    });
+    const opener = new Opener({ registry, exec, xdotoolAvailable: async () => true, sleep: async () => {} });
+    await opener.open({ workspaceId: 'abc123', cwd: '/w', target: 'a.ts' });
+    expect(calls.at(-1)).toEqual({ cmd: 'code', args: ['/w/project-a', '--goto', '/w/a.ts'] });
   });
 });

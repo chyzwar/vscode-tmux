@@ -43,15 +43,17 @@ Manual equivalent: `yarn install && yarn build`, symlink `packages/daemon/dist/c
 
 - Commands: `VS Code Tmux: Create Terminal`, `VS Code Tmux: Show Session`.
 - CLI: `vscode <path[:line[:col]]>` (alias of `vscode-tmux open`), `vscode-tmux new [name] [-- cmd...]`, `vscode-tmux list`, `vscode-tmux status`.
-- Logs: `~/.local/state/vscode-tmux/daemon.log`; state snapshot `~/.local/state/vscode-tmux/state.json`; VS Code output channel "VS Code Tmux".
+- Settings: `~/.config/vscode-tmux/config.json` (`ghosttyGdkBackend`: `x11` | `wayland` | `default`, `ghosttyStartTimeoutMs`).
+- Logs: `~/.local/state/vscode-tmux/daemon.log`, `ghostty.log`; state snapshot `~/.local/state/vscode-tmux/state.json`; VS Code output channel "VS Code Tmux".
 - Direct tmux access: `tmux -L vscode-tmux ls`.
 
 ## Limitations (current slice)
 
 - Processes do not survive an OS reboot (tmux cannot do that). Restoring sessions, tab names, cwds and optionally commands from the snapshot is the next milestone.
-- Raising the VS Code window uses `xdotool` because VS Code runs under XWayland; without xdotool the `code --goto` fallback may only flash the taskbar entry under GNOME's focus-stealing prevention.
+- Raising the VS Code window uses `xdotool` (raise + focus, verified with `getactivewindow`) because VS Code runs under XWayland; `_NET_ACTIVE_WINDOW` alone is often ignored by Mutter. Without xdotool the `code --goto` fallback may only flash the taskbar entry.
 - Ghostty prompt features (jump to prompt, notify on command finish) do not pass through tmux.
 - Quick terminal / quake dropdown needs a compositor with layer-shell (KDE, Hyprland, sway); on GNOME it needs a Shell extension.
+- The companion Ghostty runs under XWayland (`GDK_BACKEND=x11`) by default: on GNOME 42 Wayland a Ghostty started by a background process never created its terminal surface when running natively on Wayland (reproducible with `env -i <systemd user env> setsid -f ghostty --class=... --command=...`). Set `{"ghosttyGdkBackend": "wayland"}` in `~/.config/vscode-tmux/config.json` on compositors where native Wayland works.
 
 ## Development
 

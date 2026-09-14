@@ -59,6 +59,9 @@ async function open(args) {
         const reply = (await conn.request(msg, 15_000));
         if (!reply.ok)
             fail(reply.error ?? 'open failed');
+        const d = reply.data;
+        if (d.via === 'extension' && d.raised === false)
+            process.stderr.write('vscode-tmux: opened, but the window could not be raised\n');
     }
     finally {
         conn.close();

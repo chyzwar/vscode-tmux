@@ -16,4 +16,20 @@ Prerequisites: `./install.bash` ran, VS Code windows reloaded, `vscode-tmux stat
 
 Automated smoke test without VS Code (used during development): `scratchpad/fake-ext.mjs` speaks the protocol; see `packages/daemon/test/server.test.ts` for the message flow.
 
-Results 2026-09-14 (GNOME 42 Wayland, Ghostty 1.3.1 snap, tmux 3.2a, VS Code 1.132 snap): steps 1-5 verified with the daemon plus a protocol-level fake extension and a real VS Code window (xdotool raise confirmed via `xdotool getactivewindow`); steps 1-8 with the installed extension pending user verification.
+## Results 2026-09-14 (GNOME 42 Wayland, Ghostty 1.3.1 snap, tmux 3.2a, VS Code 1.132 snap, Node 26)
+
+Verified in this session:
+- Daemon + protocol-level fake extension: hello creates sessions with env; focus A → B → A switches the Ghostty tmux client in place and A's selected tab is preserved; `createTerminal` adds tabs.
+- Installed extension in four real VS Code windows: all registered and reattached after a daemon restart; the extension respawned the daemon within 2 s when it was killed.
+- `vscode README.md:3` via the CLI from a terminal of the email-automation workspace opened the file in that window and raised it (`xdotool getactivewindow` confirmed) while another window was active.
+- `vscode docs/e2e.md:9:4` typed into a real tab of the vscode-tmux workspace (real extension) opened the file in that window and raised it while email-automation was active (daemon.log: `raised=true`).
+- Ghostty launched by the daemon (systemd user unit) attaches and shows the requested session.
+
+Found and fixed along the way:
+- tmux replaces tab separators with `_` in a C locale: formats now use a printable separator.
+- Dropping `XDG_DATA_DIRS`/`GDK_*` wholesale broke GTK; scrubbing now only removes values that point into the code snap.
+- Several windows spawning the daemon at once crashed the losers on a socket unlink race; `listen()` retries and yields to the winner.
+- `xdotool windowactivate` (`_NET_ACTIVE_WINDOW`) is ignored by Mutter for XWayland windows most of the time; `windowraise` + `windowfocus --sync` is honored. The opener now does activate, raise, focus and verifies with `getactivewindow`; the exact-title search is retried because VS Code renames the window a moment after the editor opens.
+- Ghostty started by a background process never creates its surface when native Wayland on GNOME 42 (window object and D-Bus name exist, no child process; reproducible with `env -i $(systemctl --user show-environment) setsid -f ghostty --class=x --gtk-single-instance=true --command=<script>`); under `GDK_BACKEND=x11` it works every time. Default is now X11, configurable.
+
+Pending user verification after reloading VS Code windows: steps 2, 3, 6, 7, 8 interactively.

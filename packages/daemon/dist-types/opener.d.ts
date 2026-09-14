@@ -6,6 +6,10 @@ export interface OpenerOptions {
     codeCommand?: string;
     xdotoolAvailable: () => Promise<boolean>;
     log?: (line: string) => void;
+    sleep?: (ms: number) => Promise<void>;
+    /** How many times to look for the exact window title (VS Code updates it asynchronously). */
+    titleAttempts?: number;
+    titleRetryMs?: number;
 }
 export interface OpenInput {
     workspaceId?: string;
@@ -27,8 +31,25 @@ export declare class Opener {
     private readonly o;
     private readonly code;
     private readonly log;
+    private readonly sleep;
+    private readonly titleAttempts;
+    private readonly titleRetryMs;
     constructor(o: OpenerOptions);
     open(input: OpenInput): Promise<OpenOutcome>;
     private raise;
+    /**
+     * Find the X11 window of the target VS Code window. The exact title is tried
+     * a few times because VS Code renames the window shortly after the editor
+     * opens; then a match on " - <workspace name> - " is accepted if unambiguous.
+     */
+    private findWindow;
+    /**
+     * Bring an X11 window to the front. `windowactivate` (_NET_ACTIVE_WINDOW) is
+     * subject to Mutter's focus-stealing prevention and is often ignored, while a
+     * direct raise + XSetInputFocus between XWayland windows is honored; do both
+     * and verify with getactivewindow.
+     */
+    private activate;
+    private search;
     private run;
 }
