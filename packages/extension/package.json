@@ -1,0 +1,42 @@
+{
+  "name": "vscode-tmux-extension",
+  "displayName": "VS Code Tmux",
+  "description": "Connects VS Code windows to persistent Ghostty/tmux terminal sessions.",
+  "version": "0.1.0",
+  "publisher": "mapka",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "vscode-tmux.createTerminal",
+        "title": "VS Code Tmux: Create Terminal"
+      },
+      {
+        "command": "vscode-tmux.showSession",
+        "title": "VS Code Tmux: Show Session"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "vsce package --no-dependencies --allow-missing-repository -o vscode-tmux.vsix"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0"
+  },
+  "dependencies": {
+    "@vscode-tmux/protocol": "workspace:*"
+  }
+}

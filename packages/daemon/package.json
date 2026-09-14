@@ -1,0 +1,16 @@
+{
+  "name": "vscode-tmux",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": "./dist/cli.js",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@vscode-tmux/protocol": "workspace:*"
+  },
+  "engines": {
+    "node": ">=26"
+  }
+}
