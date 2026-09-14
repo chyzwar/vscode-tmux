@@ -8,7 +8,8 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "@vscode-tmux/protocol": "workspace:*"
+    "@vscode-tmux/protocol": "workspace:*",
+    "execa": "^10.0.1"
   },
   "engines": {
     "node": ">=26"

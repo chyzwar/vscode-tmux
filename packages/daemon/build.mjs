@@ -5,7 +5,7 @@ await build({
   bundle: true,
   platform: 'node',
   target: 'esnext',
-  format: 'cjs',
+  format: 'esm',
   outfile: 'dist/cli.js',
   banner: { js: '#!/usr/bin/env node' },
   sourcemap: 'inline',
