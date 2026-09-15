@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const node_crypto_1 = require("node:crypto");
+const node_fs_1 = require("node:fs");
 const node_os_1 = require("node:os");
 const node_path_1 = require("node:path");
 const vscode = __importStar(require("vscode"));
@@ -44,6 +45,13 @@ const identity_js_1 = require("./identity.js");
 const spawn_js_1 = require("./spawn.js");
 const title_js_1 = require("./title.js");
 const SOCKET_PATH = `/run/user/${(0, node_os_1.userInfo)().uid}/vscode-tmux.sock`;
+const DEFAULT_DAEMON_PATH = (0, node_path_1.join)((0, node_os_1.homedir)(), '.local', 'bin', 'vscode-tmux');
+let warnedMissingDaemon = false;
+/** The compiled daemon binary: the `vscode-tmux.daemonPath` setting, else what install.bash installs. */
+function daemonBinaryPath() {
+    const configured = vscode.workspace.getConfiguration('vscode-tmux').get('daemonPath')?.trim();
+    return configured || DEFAULT_DAEMON_PATH;
+}
 let output;
 const log = (s) => output.appendLine(`${new Date().toISOString()} ${s}`);
 async function activate(context) {
@@ -125,9 +133,17 @@ class Session {
         await new Promise((r) => setTimeout(r, 100 + Math.random() * 400));
         if (await this.tryConnect())
             return;
-        const cliJs = (0, node_path_1.join)(this.context.extensionPath, 'dist', 'cli.mjs');
+        const bin = daemonBinaryPath();
+        if (!(0, node_fs_1.existsSync)(bin)) {
+            log(`daemon binary not found at ${bin}; run install.bash or set vscode-tmux.daemonPath`);
+            if (!warnedMissingDaemon) {
+                warnedMissingDaemon = true;
+                void vscode.window.showErrorMessage(`VS Code Tmux: daemon binary not found at ${bin}. Run install.bash or set vscode-tmux.daemonPath.`);
+            }
+            return;
+        }
         try {
-            const r = (0, spawn_js_1.spawnDaemon)(cliJs, process.env, process.execPath, log);
+            const r = (0, spawn_js_1.spawnDaemon)(bin, process.env, log);
             log(`spawned daemon: ${r.method}: ${r.command}`);
         }
         catch (err) {

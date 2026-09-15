@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { userInfo } from 'node:os';
+import { existsSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Message, OpenRequestMessage, ResultMessage } from '@vscode-tmux/protocol';
 import * as vscode from 'vscode';
@@ -9,6 +10,14 @@ import { spawnDaemon } from './spawn.js';
 import { DEFAULT_TITLE_TEMPLATE, predictTitle } from './title.js';
 
 const SOCKET_PATH = `/run/user/${userInfo().uid}/vscode-tmux.sock`;
+const DEFAULT_DAEMON_PATH = join(homedir(), '.local', 'bin', 'vscode-tmux');
+let warnedMissingDaemon = false;
+
+/** The compiled daemon binary: the `vscode-tmux.daemonPath` setting, else what install.bash installs. */
+function daemonBinaryPath(): string {
+  const configured = vscode.workspace.getConfiguration('vscode-tmux').get<string>('daemonPath')?.trim();
+  return configured || DEFAULT_DAEMON_PATH;
+}
 
 let output: vscode.OutputChannel;
 const log = (s: string) => output.appendLine(`${new Date().toISOString()} ${s}`);
@@ -105,9 +114,17 @@ class Session {
     // Several windows may notice the missing daemon at once: stagger, then re-check.
     await new Promise((r) => setTimeout(r, 100 + Math.random() * 400));
     if (await this.tryConnect()) return;
-    const cliJs = join(this.context.extensionPath, 'dist', 'cli.mjs');
+    const bin = daemonBinaryPath();
+    if (!existsSync(bin)) {
+      log(`daemon binary not found at ${bin}; run install.bash or set vscode-tmux.daemonPath`);
+      if (!warnedMissingDaemon) {
+        warnedMissingDaemon = true;
+        void vscode.window.showErrorMessage(`VS Code Tmux: daemon binary not found at ${bin}. Run install.bash or set vscode-tmux.daemonPath.`);
+      }
+      return;
+    }
     try {
-      const r = spawnDaemon(cliJs, process.env, process.execPath, log);
+      const r = spawnDaemon(bin, process.env, log);
       log(`spawned daemon: ${r.method}: ${r.command}`);
     } catch (err) {
       log(`failed to spawn daemon: ${(err as Error).message}`);

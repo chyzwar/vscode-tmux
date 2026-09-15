@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { rmSync } from 'node:fs';
+rmSync('dist', { recursive: true, force: true });
 await build({
   entryPoints: ['src/extension.ts'],
   bundle: true,
@@ -11,5 +12,3 @@ await build({
   sourcemap: 'inline',
   logLevel: 'info',
 });
-mkdirSync('dist', { recursive: true });
-copyFileSync('../daemon/dist/cli.mjs', 'dist/cli.mjs');

@@ -7,8 +7,9 @@
 #   1. apt: tmux, xdotool, curl (needs sudo)
 #   2. VS Code as a .deb from Microsoft (needs sudo; skipped with --no-vscode-deb or if already a deb)
 #   3. Ghostty: checks it is installed, prints a hint otherwise
-#   4. Node >= 26 via nodenv/nvm if present, corepack + yarn 4, `yarn install && yarn build`
-#   5. CLI symlinks: ~/.local/bin/vscode-tmux and ~/.local/bin/vscode
+#   4. Bun (compiles the daemon), Node >= 26 via nodenv/nvm (yarn 4, extension build, tests),
+#      corepack + yarn 4, `yarn install && yarn build`
+#   5. CLI: copies the daemon binary to ~/.local/bin/vscode-tmux, symlinks ~/.local/bin/vscode
 #   6. Configs: ~/.config/vscode-tmux/{tmux.conf,ghostty.conf} (kept if present unless --force-config)
 #   7. Installs the extension .vsix into VS Code
 set -euo pipefail
@@ -73,18 +74,26 @@ else
   warn "Ghostty not found. Install it (e.g. 'sudo snap install ghostty --classic' or the ghostty-ubuntu .deb) and re-run."
 fi
 
-# 4. Node / yarn / build -----------------------------------------------------
+# 4. Bun / Node / yarn / build ----------------------------------------------
+export PATH="$HOME/.bun/bin:$PATH"
+if ! command -v bun >/dev/null; then
+  log "installing Bun (compiles the daemon; only touches ~/.bun and your shell rc)"
+  curl -fsSL https://bun.sh/install | bash
+  hash -r
+fi
+command -v bun >/dev/null || die "bun not found after install; install Bun (https://bun.sh) and re-run"
+log "bun $(bun --version)"
 if [[ -n "${NODENV_ROOT:-}" || -d "$HOME/.nodenv" ]]; then
   export PATH="$HOME/.nodenv/bin:$HOME/.nodenv/shims:$PATH"
   eval "$(nodenv init - 2>/dev/null || true)"
 fi
-if ! command -v node >/dev/null; then die "node not found; install Node >= 26 (nodenv/nvm/apt) and re-run"; fi
+if ! command -v node >/dev/null; then die "node not found; install Node >= 26 (nodenv/nvm/apt) and re-run (needed for yarn 4 and the extension build)"; fi
 node_major="$(node -p 'process.versions.node.split(".")[0]')"
 if (( node_major < 26 )); then
   if command -v nodenv >/dev/null && nodenv versions --bare 2>/dev/null | grep -q '^26\.'; then
     log "using node $(nodenv versions --bare | grep '^26\.' | tail -1) from nodenv"
   else
-    warn "node $node_major found; the daemon targets Node >= 26 (the repo pins 26 via .node-version)"
+    warn "node $node_major found; the build tooling targets Node >= 26 (the repo pins 26 via .node-version)"
   fi
 fi
 cd "$REPO"
@@ -100,12 +109,16 @@ yarn install
 yarn build
 ( cd packages/extension && yarn package >/dev/null )
 
-# 5. CLI symlinks ------------------------------------------------------------
+# 5. CLI ---------------------------------------------------------------------
+# The daemon binary is copied (atomic rename): a running daemon keeps its old inode,
+# `vscode file` never execs a half-written file, and later builds never hit ETXTBSY.
 mkdir -p "$HOME/.local/bin"
-ln -sfn "$REPO/packages/daemon/dist/cli.mjs" "$HOME/.local/bin/vscode-tmux"
+daemon_bin="$HOME/.local/bin/vscode-tmux"
+install -m 0755 "$REPO/packages/daemon/dist/vscode-tmux" "$daemon_bin.new"
+mv -f "$daemon_bin.new" "$daemon_bin"
+chmod +x "$REPO/packages/daemon/bin/vscode"
 ln -sfn "$REPO/packages/daemon/bin/vscode" "$HOME/.local/bin/vscode"
-chmod +x "$REPO/packages/daemon/dist/cli.mjs" "$REPO/packages/daemon/bin/vscode"
-log "linked ~/.local/bin/vscode-tmux and ~/.local/bin/vscode"
+log "installed ~/.local/bin/vscode-tmux ($(du -h "$daemon_bin" | cut -f1)) and linked ~/.local/bin/vscode"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "~/.local/bin is not on your PATH" ;; esac
 
 # 6. Configs -----------------------------------------------------------------
@@ -130,21 +143,24 @@ fi
 
 # 8. (Re)start the daemon on the new build --------------------------------------
 unit="vscode-tmux-$(id -u)"
-if [[ -S "/run/user/$(id -u)/vscode-tmux.sock" ]]; then
+sock="/run/user/$(id -u)/vscode-tmux.sock"
+if [[ -S "$sock" ]]; then
   log "stopping running daemon"
-  systemctl --user stop "$unit.service" 2>/dev/null || pkill -f '[c]li.mjs daemon' || true
+  # A daemon started detached (no systemd) is found through its own status reply; never pkill by pattern.
+  pid="$("$daemon_bin" status 2>/dev/null | sed -n 's/^ *"pid": \([0-9]*\),*$/\1/p' | head -1)"
+  systemctl --user stop "$unit.service" 2>/dev/null || true
+  if [[ -S "$sock" && -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; fi
   sleep 1
 fi
-node_bin="$(command -v node)"
-if command -v systemd-run >/dev/null && systemd-run --user --collect --quiet --unit="$unit" --setenv=PATH="$PATH" "$node_bin" "$REPO/packages/daemon/dist/cli.mjs" daemon 2>/dev/null; then
+if command -v systemd-run >/dev/null && systemd-run --user --collect --quiet --unit="$unit" --setenv=PATH="$PATH" "$daemon_bin" daemon 2>/dev/null; then
   log "daemon started as transient user unit $unit"
 else
-  nohup "$node_bin" "$REPO/packages/daemon/dist/cli.mjs" daemon >/dev/null 2>&1 &
+  nohup "$daemon_bin" daemon >/dev/null 2>&1 &
   disown
   log "daemon started (detached)"
 fi
 sleep 2
-"$HOME/.local/bin/vscode-tmux" status >/dev/null && log "daemon answers on $(id -u)'s socket" || warn "daemon did not answer; check ~/.local/state/vscode-tmux/daemon.log"
+"$daemon_bin" status >/dev/null && log "daemon answers on $sock" || warn "daemon did not answer; check ~/.local/state/vscode-tmux/daemon.log"
 
 cat <<EOF
 

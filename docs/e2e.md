@@ -1,6 +1,6 @@
 # End-to-end checklist (vertical slice)
 
-Prerequisites: `./install.bash` ran, VS Code windows reloaded, `vscode-tmux status` prints a socket.
+Prerequisites: `./install.bash` ran (it installs the compiled daemon binary at `~/.local/bin/vscode-tmux`), VS Code windows reloaded, `vscode-tmux status` prints a socket and `"runtime": "bun ..."`.
 
 | # | Step | Expected |
 |---|------|----------|

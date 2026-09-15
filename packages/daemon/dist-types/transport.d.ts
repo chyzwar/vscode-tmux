@@ -23,7 +23,17 @@ export interface ListenOptions {
     socketPath: string;
     onConnection: (conn: SocketConnection) => void;
     onDisconnect: (conn: SocketConnection) => void;
+    /**
+     * Called once if another process replaces our socket file. Node fails a second
+     * `listen()` on a bound path with EADDRINUSE; Bun instead unlinks the path and binds
+     * its own socket, leaving the first server on an orphaned inode. Polled every
+     * `watchIntervalMs` (default 2 s) until the server closes.
+     */
+    onPathLost?: () => void;
+    watchIntervalMs?: number;
 }
+/** True while the socket file at `socketPath` is still the one we bound (same inode). */
+export declare function ownsSocketPath(socketPath: string, ino: bigint): boolean;
 /**
  * Listen on a Unix socket. Several daemons may start at once (one per VS Code
  * window); exactly one must win. A stale socket file is removed, ENOENT/EADDRINUSE

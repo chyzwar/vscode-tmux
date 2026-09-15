@@ -26,7 +26,17 @@
         "command": "vscode-tmux.showSession",
         "title": "VS Code Tmux: Show Session"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "VS Code Tmux",
+      "properties": {
+        "vscode-tmux.daemonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path of the vscode-tmux daemon binary. Empty means ~/.local/bin/vscode-tmux, which install.bash installs."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "node build.mjs",

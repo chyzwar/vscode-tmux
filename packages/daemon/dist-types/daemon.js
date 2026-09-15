@@ -68,6 +68,10 @@ export async function runDaemon(o = {}) {
                 conn.onMessage((msg) => void server.handle(conn, msg));
             },
             onDisconnect: (conn) => server.disconnected(conn),
+            onPathLost: () => {
+                log(`socket path ${sock} was taken over by another daemon; exiting`);
+                process.exit(0);
+            },
         });
     }
     catch (err) {

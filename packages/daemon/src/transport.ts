@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { createServer, createConnection, type Server, type Socket } from 'node:net';
 import { NdjsonDecoder, encode, type Message } from '@vscode-tmux/protocol';
 import type { Connection } from './registry.js';
@@ -92,6 +92,23 @@ export interface ListenOptions {
   socketPath: string;
   onConnection: (conn: SocketConnection) => void;
   onDisconnect: (conn: SocketConnection) => void;
+  /**
+   * Called once if another process replaces our socket file. Node fails a second
+   * `listen()` on a bound path with EADDRINUSE; Bun instead unlinks the path and binds
+   * its own socket, leaving the first server on an orphaned inode. Polled every
+   * `watchIntervalMs` (default 2 s) until the server closes.
+   */
+  onPathLost?: () => void;
+  watchIntervalMs?: number;
+}
+
+/** True while the socket file at `socketPath` is still the one we bound (same inode). */
+export function ownsSocketPath(socketPath: string, ino: bigint): boolean {
+  try {
+    return statSync(socketPath, { bigint: true }).ino === ino;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -138,7 +155,19 @@ export async function listen(o: ListenOptions): Promise<Server> {
       throw err;
     }
     chmodSync(o.socketPath, 0o600);
+    if (o.onPathLost) watchOwnership(server, o.socketPath, o.onPathLost, o.watchIntervalMs ?? 2000);
     return server;
   }
   throw new Error(`could not bind ${o.socketPath} after several attempts`);
+}
+
+function watchOwnership(server: Server, socketPath: string, onLost: () => void, intervalMs: number): void {
+  const ino = statSync(socketPath, { bigint: true }).ino;
+  const timer = setInterval(() => {
+    if (ownsSocketPath(socketPath, ino)) return;
+    clearInterval(timer);
+    onLost();
+  }, intervalMs);
+  timer.unref();
+  server.once('close', () => clearInterval(timer));
 }

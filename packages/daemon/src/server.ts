@@ -187,7 +187,16 @@ export class DaemonServer {
   private async status() {
     const sessions = await this.o.backend.listSessions();
     const clients = await this.o.backend.listClients();
-    return { socket: this.o.socketPath, stateFile: this.o.stateFile, sessions, clients, connected: this.registry.connectedIds() };
+    const versions = process.versions as { bun?: string; node: string };
+    return {
+      socket: this.o.socketPath,
+      stateFile: this.o.stateFile,
+      pid: process.pid,
+      runtime: versions.bun ? `bun ${versions.bun}` : `node ${versions.node}`,
+      sessions,
+      clients,
+      connected: this.registry.connectedIds(),
+    };
   }
 
   /** Persist the current tabs of a workspace (names, cwd, and the start command when we know it). */

@@ -21,29 +21,29 @@ VS Code window B --ext--+   unix socket (NDJSON)      |     session project-a-<i
 - **Workspace identity** is VS Code's own workspace id (md5 of folder path + inode), read from the extension's storage path. It survives restarts and is unique per window.
 - **Session backend** is a dedicated tmux server: one session per workspace, one window per terminal tab, per-session environment (`VSCODE_TMUX_WORKSPACE_ID`, `VSCODE_TMUX_WORKSPACE`, `VSCODE_TMUX_SOCKET`).
 - **Presentation** is Ghostty as a single-surface container running one tmux client. A focus change is one `tmux switch-client`. The tab bar is tmux's status line (click to select, `alt+1..9`, `alt+t` new tab, `alt+r` rename, `alt+w` close).
-- **Daemon** (Node 26, TypeScript) is auto-started by the extension (via a transient systemd user unit when available) and owns the registry, the tmux server, the Ghostty process and file-open routing.
+- **Daemon** (TypeScript, shipped as one Bun-compiled Linux x64 binary at `~/.local/bin/vscode-tmux`) is auto-started by the extension (via a transient systemd user unit when available) and owns the registry, the tmux server, the Ghostty process and file-open routing. See `docs/adr/0002-compiled-bun-daemon.md`.
 
 Why not native Ghostty sessions or native tabs: they do not exist / cannot be driven externally yet. See `docs/adr/0001-session-backend-and-presentation.md` and `docs/research/`. The backend and presenter are interfaces so kitty native tabs, or Ghostty sessions once they land upstream, can be added later.
 
 ## Install
 
-Requirements: Ubuntu/Debian-like Linux, Ghostty 1.2+, Node >= 26, VS Code.
+Requirements: Ubuntu/Debian-like Linux (x64), Ghostty 1.2+, VS Code, Bun >= 1.3 (installed by `install.bash` if missing; compiles the daemon), Node >= 26 (yarn 4, extension build, tests).
 
 ```bash
 git clone <this repo> ~/MyProjects/vscode-tmux
 cd ~/MyProjects/vscode-tmux
-./install.bash            # apt tmux xdotool, VS Code .deb, yarn build, CLI symlinks, configs, extension
+./install.bash            # apt tmux xdotool, VS Code .deb, bun + yarn build, daemon binary, configs, extension
 ```
 
 Options: `--no-apt`, `--no-vscode-deb`, `--force-config`. Then reload your VS Code windows.
 
-Manual equivalent: `yarn install && yarn build`, symlink `packages/daemon/dist/cli.mjs` to `~/.local/bin/vscode-tmux` and `packages/daemon/bin/vscode` to `~/.local/bin/vscode`, copy `config/*.conf` to `~/.config/vscode-tmux/`, `code --install-extension packages/extension/vscode-tmux.vsix`.
+Manual equivalent: `yarn install && yarn build`, copy `packages/daemon/dist/vscode-tmux` to `~/.local/bin/vscode-tmux`, symlink `packages/daemon/bin/vscode` to `~/.local/bin/vscode`, copy `config/*.conf` to `~/.config/vscode-tmux/`, `code --install-extension packages/extension/vscode-tmux.vsix`. The extension only spawns the binary; the .vsix does not contain it. Put it elsewhere with the `vscode-tmux.daemonPath` VS Code setting.
 
 ## Use
 
 - Commands: `VS Code Tmux: Create Terminal`, `VS Code Tmux: Show Session`.
 - CLI: `vscode <path[:line[:col]]>` (alias of `vscode-tmux open`), `vscode-tmux new [name] [-- cmd...]`, `vscode-tmux list`, `vscode-tmux status`.
-- Settings: `~/.config/vscode-tmux/config.json` (`ghosttyGdkBackend`: `x11` | `wayland` | `default`, `ghosttyStartTimeoutMs`).
+- Settings: `~/.config/vscode-tmux/config.json` (`ghosttyGdkBackend`: `x11` | `wayland` | `default`, `ghosttyStartTimeoutMs`). VS Code setting `vscode-tmux.daemonPath` overrides the daemon binary location.
 - Logs: `~/.local/state/vscode-tmux/daemon.log`, `ghostty.log`; state snapshot `~/.local/state/vscode-tmux/state.json`; VS Code output channel "VS Code Tmux".
 - Direct tmux access: `tmux -L vscode-tmux ls`.
 
@@ -58,10 +58,13 @@ Manual equivalent: `yarn install && yarn build`, symlink `packages/daemon/dist/c
 ## Development
 
 ```bash
-yarn test          # vitest (unit + a real-tmux integration test if tmux is installed)
+yarn test          # vitest on Node (unit, a real-tmux integration test, and a smoke test of the compiled binary if built)
 yarn typecheck
-yarn build
-node packages/daemon/dist/cli.mjs daemon --foreground
+yarn build         # extension via esbuild; daemon via `bun build --compile` -> packages/daemon/dist/vscode-tmux
+yarn workspace vscode-tmux dev              # daemon in the foreground from source (bun run)
+./packages/daemon/dist/vscode-tmux daemon --foreground
 ```
+
+The daemon source uses only `node:` APIs so tests run on Node while the shipped binary runs on Bun. `VSCODE_TMUX_SOCKET` overrides the socket path (tests use it for isolation).
 
 Layout: `packages/protocol` (messages, NDJSON codec, env scrubbing), `packages/daemon` (backend, presenter, opener, server, CLI), `packages/extension` (VS Code extension), `config/` (tmux and Ghostty instance configs), `docs/` (ADR, research, plans).
