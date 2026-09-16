@@ -20,7 +20,7 @@ VS Code window B --ext--+   unix socket (NDJSON)      |     session project-a-<i
 
 - **Workspace identity** is VS Code's own workspace id (md5 of folder path + inode), read from the extension's storage path. It survives restarts and is unique per window.
 - **Session backend** is a dedicated tmux server: one session per workspace, one window per terminal tab, per-session environment (`VSCODE_TMUX_WORKSPACE_ID`, `VSCODE_TMUX_WORKSPACE`, `VSCODE_TMUX_SOCKET`).
-- **Presentation** is Ghostty as a single-surface container running one tmux client. A focus change is one `tmux switch-client`. The tab bar is tmux's status line (click to select, `alt+1..9`, `alt+t` new tab, `alt+r` rename, `alt+w` close).
+- **Presentation** is Ghostty as a single-surface container running one tmux client. A focus change is one `tmux switch-client`. The tab bar is tmux's status line (click to select, `alt+1..9`, `ctrl+wheel` or wheel over the bar to cycle, `ctrl+t`/`alt+t` new tab, `alt+r` rename, `alt+w` close).
 - **Daemon** (TypeScript, shipped as one Bun-compiled Linux x64 binary at `~/.local/bin/vscode-tmux`) is auto-started by the extension (via a transient systemd user unit when available) and owns the registry, the tmux server, the Ghostty process and file-open routing. See `docs/adr/0002-compiled-bun-daemon.md`.
 
 Why not native Ghostty sessions or native tabs: they do not exist / cannot be driven externally yet. See `docs/adr/0001-session-backend-and-presentation.md` and `docs/research/`. The backend and presenter are interfaces so kitty native tabs, or Ghostty sessions once they land upstream, can be added later.
