@@ -7,8 +7,8 @@
 #   1. apt: tmux, xdotool, curl (needs sudo)
 #   2. VS Code as a .deb from Microsoft (needs sudo; skipped with --no-vscode-deb or if already a deb)
 #   3. Ghostty: checks it is installed, prints a hint otherwise
-#   4. Bun (compiles the daemon), Node >= 26 via nodenv/nvm (yarn 4, extension build, tests),
-#      corepack + yarn 4, `yarn install && yarn build`
+#   4. Bun (package manager, compiles the daemon), Node >= 26 via nodenv/nvm (esbuild, tsc,
+#      vitest, vsce), `bun install && bun run build`
 #   5. CLI: copies the daemon binary to ~/.local/bin/vscode-tmux, symlinks ~/.local/bin/vscode
 #   6. Configs: ~/.config/vscode-tmux/{tmux.conf,ghostty.conf} (kept if present unless --force-config)
 #   7. Installs the extension .vsix into VS Code
@@ -74,7 +74,7 @@ else
   warn "Ghostty not found. Install it (e.g. 'sudo snap install ghostty --classic' or the ghostty-ubuntu .deb) and re-run."
 fi
 
-# 4. Bun / Node / yarn / build ----------------------------------------------
+# 4. Bun / Node / build ----------------------------------------------------
 export PATH="$HOME/.bun/bin:$PATH"
 if ! command -v bun >/dev/null; then
   log "installing Bun (compiles the daemon; only touches ~/.bun and your shell rc)"
@@ -87,7 +87,7 @@ if [[ -n "${NODENV_ROOT:-}" || -d "$HOME/.nodenv" ]]; then
   export PATH="$HOME/.nodenv/bin:$HOME/.nodenv/shims:$PATH"
   eval "$(nodenv init - 2>/dev/null || true)"
 fi
-if ! command -v node >/dev/null; then die "node not found; install Node >= 26 (nodenv/nvm/apt) and re-run (needed for yarn 4 and the extension build)"; fi
+if ! command -v node >/dev/null; then die "node not found; install Node >= 26 (nodenv/nvm/apt) and re-run (esbuild, tsc, vitest and vsce run on Node)"; fi
 node_major="$(node -p 'process.versions.node.split(".")[0]')"
 if (( node_major < 26 )); then
   if command -v nodenv >/dev/null && nodenv versions --bare 2>/dev/null | grep -q '^26\.'; then
@@ -97,17 +97,10 @@ if (( node_major < 26 )); then
   fi
 fi
 cd "$REPO"
-if ! command -v yarn >/dev/null || ! yarn --version 2>/dev/null | grep -q '^4\.'; then
-  log "enabling corepack for yarn 4"
-  if ! corepack --version >/dev/null 2>&1; then npm install -g corepack@latest >/dev/null; fi
-  corepack enable
-  command -v nodenv >/dev/null && nodenv rehash || true
-  hash -r
-fi
-log "yarn install && yarn build"
-yarn install
-yarn build
-( cd packages/extension && yarn package >/dev/null )
+log "bun install && bun run build"
+bun install --frozen-lockfile
+bun run build
+bun run --filter vscode-tmux-extension package >/dev/null
 
 # 5. CLI ---------------------------------------------------------------------
 # The daemon binary is copied (atomic rename): a running daemon keeps its old inode,

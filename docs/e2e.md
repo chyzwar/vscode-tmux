@@ -12,7 +12,7 @@ Prerequisites: `./install.bash` ran (it installs the compiled daemon binary at `
 | 6 | Close window A. | `tmux -L vscode-tmux ls` still lists A's session; `sleep` still alive. |
 | 7 | Reopen folder A. | Extension output says "reattached"; Ghostty shows the same tabs; no new session. |
 | 8 | Close the Ghostty window; click a VS Code window. | Ghostty is relaunched by the daemon and shows that workspace. |
-| 9 | `yarn test` | all green. |
+| 9 | `bun run test` | all green. |
 
 Automated smoke test without VS Code (used during development): `scratchpad/fake-ext.mjs` speaks the protocol; see `packages/daemon/test/server.test.ts` for the message flow.
 

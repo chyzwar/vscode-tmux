@@ -27,17 +27,17 @@ Why not native Ghostty sessions or native tabs: they do not exist / cannot be dr
 
 ## Install
 
-Requirements: Ubuntu/Debian-like Linux (x64), Ghostty 1.2+, VS Code, Bun >= 1.3 (installed by `install.bash` if missing; compiles the daemon), Node >= 26 (yarn 4, extension build, tests).
+Requirements: Ubuntu/Debian-like Linux (x64), Ghostty 1.2+, VS Code, Bun >= 1.3 (installed by `install.bash` if missing; package manager and daemon compiler), Node >= 26 (esbuild, tsc, vitest and vsce run on Node).
 
 ```bash
 git clone <this repo> ~/MyProjects/vscode-tmux
 cd ~/MyProjects/vscode-tmux
-./install.bash            # apt tmux xdotool, VS Code .deb, bun + yarn build, daemon binary, configs, extension
+./install.bash            # apt tmux xdotool, VS Code .deb, bun install + build, daemon binary, configs, extension
 ```
 
 Options: `--no-apt`, `--no-vscode-deb`, `--force-config`. Then reload your VS Code windows.
 
-Manual equivalent: `yarn install && yarn build`, copy `packages/daemon/dist/vscode-tmux` to `~/.local/bin/vscode-tmux`, symlink `packages/daemon/bin/vscode` to `~/.local/bin/vscode`, copy `config/*.conf` to `~/.config/vscode-tmux/`, `code --install-extension packages/extension/vscode-tmux.vsix`. The extension only spawns the binary; the .vsix does not contain it. Put it elsewhere with the `vscode-tmux.daemonPath` VS Code setting.
+Manual equivalent: `bun install && bun run build`, copy `packages/daemon/dist/vscode-tmux` to `~/.local/bin/vscode-tmux`, symlink `packages/daemon/bin/vscode` to `~/.local/bin/vscode`, copy `config/*.conf` to `~/.config/vscode-tmux/`, `code --install-extension packages/extension/vscode-tmux.vsix`. The extension only spawns the binary; the .vsix does not contain it. Put it elsewhere with the `vscode-tmux.daemonPath` VS Code setting.
 
 ## Use
 
@@ -58,10 +58,10 @@ Manual equivalent: `yarn install && yarn build`, copy `packages/daemon/dist/vsco
 ## Development
 
 ```bash
-yarn test          # vitest on Node (unit, a real-tmux integration test, and a smoke test of the compiled binary if built)
-yarn typecheck
-yarn build         # extension via esbuild; daemon via `bun build --compile` -> packages/daemon/dist/vscode-tmux
-yarn workspace vscode-tmux dev              # daemon in the foreground from source (bun run)
+bun run test       # vitest on Node (unit, a real-tmux integration test, and a smoke test of the compiled binary if built); not `bun test`
+bun run typecheck
+bun run build      # extension via esbuild; daemon via `bun build --compile` -> packages/daemon/dist/vscode-tmux
+(cd packages/daemon && bun run dev)         # daemon in the foreground from source
 ./packages/daemon/dist/vscode-tmux daemon --foreground
 ```
 

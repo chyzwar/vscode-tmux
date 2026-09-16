@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { realExec } from '../src/exec.js';
 
 /**
- * Black-box test of the compiled daemon binary (`yarn build` output). Runs the real
+ * Black-box test of the compiled daemon binary (`bun run build` output). Runs the real
  * runtime the daemon ships with, which is what the unit tests on Node cannot cover:
  * unix socket bind semantics, signals, argv layout.
  */

@@ -22,7 +22,7 @@ Measured before deciding: CLI startup is 60-70 ms under both runtimes (dominated
 ## Consequences
 
 - `~/.local/bin/vscode-tmux` is ~100 MB (the Bun runtime is embedded). Acceptable for an installer-distributed tool.
-- Bun is a build requirement; Node >= 26 remains one for yarn 4, esbuild (extension) and vitest.
+- Bun is a build requirement and, since 2026-09-15, also the package manager (yarn 4 and corepack were dropped). Node >= 26 remains one for esbuild, tsc, vitest and vsce, which Bun runs with Node.
 - The .vsix is not self-contained: without `install.bash` (or the setting) the extension shows an error and stays idle.
 - The binary is Linux x64 only; other targets need `--target` changes in the daemon build script.
 
