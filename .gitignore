@@ -3,3 +3,5 @@ dist/
 *.vsix
 .pnp.*
 *.log
+dist-types/
+*.tsbuildinfo
