@@ -33,3 +33,19 @@ Found and fixed along the way:
 - Ghostty started by a background process never creates its surface when native Wayland on GNOME 42 (window object and D-Bus name exist, no child process; reproducible with `env -i $(systemctl --user show-environment) setsid -f ghostty --class=x --gtk-single-instance=true --command=<script>`); under `GDK_BACKEND=x11` it works every time. Default is now X11, configurable.
 
 Pending user verification after reloading VS Code windows: steps 2, 3, 6, 7, 8 interactively.
+
+## Results 2026-09-17 (GNOME 42 Wayland, VS Code 1.137 .deb)
+
+- VS Code 1.137 (.deb, Electron 42.10) runs as a native Wayland client (`--ozone-platform=wayland` in its child processes); `xdotool search --name 'Visual Studio Code'` finds nothing, and `_NET_CLIENT_LIST` only lists the XWayland Ghostty. The xdotool raise path is therefore dead on every Wayland desktop; the daemon now picks a raiser per desktop (`packages/daemon/src/raise/`): KWin scripting on Plasma, xdotool in X11 sessions, none otherwise.
+- The new code paths were unit-tested with fake `busctl`/extension replies and by executing the generated KWin script against a fake `workspace`; no KWin was available to test against.
+
+## Kubuntu 26.04 (Plasma 6.6, Wayland) — to verify on the new machine
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | `./install.bash` | apt installs `ghostty` from the archive (1.3.0); the script prints "window raising: KWin scripting over D-Bus". |
+| 2 | Focus a VS Code window. | Ghostty appears as a native Wayland window (no `GDK_BACKEND` in `daemon.log`'s settings line means `auto`; KWin's window info shows app id `dev.vscodetmux.Ghostty`, server-side decorations). |
+| 3 | From a tab of A while B is active: `vscode README.md:3`. | `daemon.log`: `window raiser: KWin scripting via busctl`, then `raised=true`; A is in front. `~/.local/state/vscode-tmux/kwin-raise.js` holds the last script. |
+| 4 | Same with A minimized / on another virtual desktop. | KWin unminimizes / switches desktop. |
+| 5 | `busctl --user status org.kde.KWin` and `busctl --user --json=short call org.kde.KWin /Scripting org.kde.kwin.Scripting isScriptLoaded s vscode-tmux-raise` after an open. | KWin owns the name; the script is unloaded again (`false`). |
+| 6 | Ghostty quick terminal (optional): set `quick-terminal-*` keys in `~/.config/vscode-tmux/ghostty.conf`. | Works on KWin (layer-shell), unlike GNOME. |
