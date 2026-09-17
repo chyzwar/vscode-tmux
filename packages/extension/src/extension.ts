@@ -178,6 +178,7 @@ class Session {
   }
 
   private async handleRequest(msg: Message): Promise<Message> {
+    if (msg.type === 'windowStateRequest') return { type: 'result', id: msg.id, ok: true, data: { focused: vscode.window.state.focused } };
     if (msg.type !== 'openRequest') {
       return { type: 'result', id: (msg as { id?: string }).id ?? '', ok: false, error: `unexpected ${msg.type}` };
     }

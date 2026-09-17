@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@vscode-tmux/protocol';
-import { Opener, escapeRegex } from '../src/opener.js';
+import { Opener, type WindowRaiser } from '../src/opener.js';
+import { escapeRegex } from '../src/raise/match.js';
+import { XdotoolRaiser } from '../src/raise/xdotool.js';
 import { Registry, type Connection } from '../src/registry.js';
 import { fakeExec } from './fakeExec.js';
 
@@ -28,7 +30,8 @@ function setup(o: { connected?: boolean; xdotool?: boolean; reply?: (m: Message)
     if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: `${Number(focused)}\n` };
     return undefined;
   });
-  const opener = new Opener({ registry, exec, xdotoolAvailable: async () => o.xdotool ?? true, sleep: async () => {} });
+  const raiser = o.xdotool === false ? undefined : new XdotoolRaiser({ exec, sleep: async () => {} });
+  const opener = new Opener({ registry, exec, raiser: async () => raiser });
   return { opener, calls, received };
 }
 
@@ -126,8 +129,47 @@ describe('Opener when the window never becomes active', () => {
       if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: '9\n' };
       return undefined;
     });
-    const opener = new Opener({ registry, exec, xdotoolAvailable: async () => true, sleep: async () => {} });
+    const opener = new Opener({ registry, exec, raiser: async () => new XdotoolRaiser({ exec, sleep: async () => {} }) });
     await opener.open({ workspaceId: 'abc123', cwd: '/w', target: 'a.ts' });
     expect(calls.at(-1)).toEqual({ cmd: 'code', args: ['/w/project-a', '--goto', '/w/a.ts'] });
+  });
+});
+
+describe('Opener with a compositor raiser (KWin path)', () => {
+  function kwinSetup(focused: boolean) {
+    const registry = new Registry();
+    registry.upsert(ws);
+    const { conn, received } = fakeConnection((m) =>
+      m.type === 'windowStateRequest'
+        ? { type: 'result', id: m.id, ok: true, data: { focused } }
+        : { type: 'openResult', id: (m as { id: string }).id, ok: true, title: 'T - project-a - Code' },
+    );
+    registry.attach(ws.workspaceId, conn);
+    const seen: string[] = [];
+    const raiser: WindowRaiser = {
+      async raise(title, name, isFocused) {
+        seen.push(`${title}|${name}`);
+        return isFocused();
+      },
+    };
+    const { exec, calls } = fakeExec();
+    const opener = new Opener({ registry, exec, raiser: async () => raiser });
+    return { opener, calls, received, seen };
+  }
+
+  it('verifies the raise by asking the extension for its window state', async () => {
+    const { opener, calls, received, seen } = kwinSetup(true);
+    const r = await opener.open({ workspaceId: 'abc123', cwd: '/w', target: 'a.ts' });
+    expect(seen).toEqual(['T - project-a - Code|project-a']);
+    expect(received.map((m) => m.type)).toEqual(['openRequest', 'windowStateRequest']);
+    expect(r.raised).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('falls back to the code CLI when the window never reports focus', async () => {
+    const { opener, calls } = kwinSetup(false);
+    const r = await opener.open({ workspaceId: 'abc123', cwd: '/w', target: 'a.ts' });
+    expect(calls).toEqual([{ cmd: 'code', args: ['/w/project-a', '--goto', '/w/a.ts'] }]);
+    expect(r.raised).toBe(true); // code CLI exit 0
   });
 });

@@ -3,11 +3,12 @@ import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { TmuxBackend } from './backend/tmux.js';
 import { scrubEnv } from '@vscode-tmux/protocol';
-import { realExec } from './exec.js';
+import { realExec, type Exec } from './exec.js';
 import { fileLogger } from './log.js';
 import { Opener } from './opener.js';
 import { Registry } from './registry.js';
 import { GhosttyPresenter } from './presenter/ghostty.js';
+import { selectRaiser, type WindowRaiser } from './raise/index.js';
 import { GHOSTTY_CLASS, LOBBY_SESSION, TMUX_SOCKET_NAME, configDir, socketPath, stateDir } from './paths.js';
 import { DaemonServer } from './server.js';
 import { ghosttyEnvFor, loadSettings } from './settings.js';
@@ -32,7 +33,7 @@ export async function runDaemon(o: DaemonOptions = {}): Promise<void> {
   const backend = new TmuxBackend({ exec: realExec, socketName: TMUX_SOCKET_NAME, configPath: tmuxConfig, env });
   const presenter = new GhosttyPresenter({
     backend,
-    env: { ...env, ...ghosttyEnvFor(settings) },
+    env: { ...env, ...ghosttyEnvFor(settings, env) },
     timeoutMs: settings.ghosttyStartTimeoutMs,
     configPath: ghosttyConfig,
     appClass: GHOSTTY_CLASS,
@@ -49,11 +50,13 @@ export async function runDaemon(o: DaemonOptions = {}): Promise<void> {
     },
   });
   const registry = new Registry();
-  let xdotool: boolean | undefined;
+  const exec: Exec = (cmd, args, opts) => realExec(cmd, args, { ...opts, env: opts?.env ?? env });
+  let raiser: WindowRaiser | undefined;
   const opener = new Opener({
     registry,
-    exec: (cmd, args, opts) => realExec(cmd, args, { ...opts, env: opts?.env ?? env }),
-    xdotoolAvailable: async () => (xdotool ??= (await realExec('xdotool', ['version'], { env })).code === 0),
+    exec,
+    // Probed on first use and kept; re-probed while nothing was found (KWin may come up later).
+    raiser: async () => (raiser ??= await selectRaiser({ exec, log, kwinScriptPath: join(dir, 'kwin-raise.js') })),
     log,
   });
   const server = new DaemonServer({

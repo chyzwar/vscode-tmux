@@ -81,6 +81,12 @@ export interface OpenResultMessage {
   error?: string;
 }
 
+/** Daemon → extension: does your window have OS focus right now? Answered with a `result` whose data is `{ focused: boolean }`. */
+export interface WindowStateRequestMessage {
+  type: 'windowStateRequest';
+  id: string;
+}
+
 export interface ResultMessage {
   type: 'result';
   id: string;
@@ -99,6 +105,7 @@ export type Message =
   | StatusMessage
   | OpenRequestMessage
   | OpenResultMessage
+  | WindowStateRequestMessage
   | ResultMessage;
 
 export type MessageType = Message['type'];

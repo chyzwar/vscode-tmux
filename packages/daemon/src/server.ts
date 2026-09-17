@@ -68,6 +68,7 @@ export class DaemonServer {
         case 'openResult':
         case 'result':
         case 'openRequest':
+        case 'windowStateRequest':
           // replies are routed by the transport layer (SocketConnection); nothing to do here
           return;
         default: {
