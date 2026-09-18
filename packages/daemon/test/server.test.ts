@@ -129,6 +129,23 @@ describe('DaemonServer', () => {
     expect(sent[0]).toMatchObject({ type: 'result', id: 'o1', ok: true, data: { via: 'extension' } });
   });
 
+  it('resolves the workspace from the tmux session when an open only knows that', async () => {
+    // A mouse click is delivered by tmux, which knows the session but never the
+    // shell environment that carries the workspace id.
+    const { server, opened } = setup();
+    const { conn } = fakeConn();
+    await server.handle(conn, hello('abcdef0123456789', '/w/project-a'));
+    await server.handle(conn, { type: 'open', id: 'o2', sessionName: 'project-a-abcdef01', cwd: '/w/project-a', target: '/w/project-a/a.ts:3' });
+    expect(opened.at(-1)).toEqual({ workspaceId: 'abcdef0123456789', cwd: '/w/project-a', target: '/w/project-a/a.ts:3' });
+  });
+
+  it('falls back to the code CLI when the session is unknown', async () => {
+    const { server, opened } = setup();
+    const { conn } = fakeConn();
+    await server.handle(conn, { type: 'open', id: 'o3', sessionName: 'gone-12345678', cwd: '/w', target: 'a.ts' });
+    expect(opened.at(-1)).toEqual({ cwd: '/w', target: 'a.ts' });
+  });
+
   it('list reports workspaces with their tabs', async () => {
     const { server } = setup();
     const { conn, sent } = fakeConn();

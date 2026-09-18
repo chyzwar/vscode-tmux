@@ -21,4 +21,10 @@ export function configDir(): string {
 
 export const TMUX_SOCKET_NAME = 'vscode-tmux';
 export const GHOSTTY_CLASS = 'dev.vscodetmux.Ghostty';
+/**
+ * systemd user unit that runs the companion Ghostty. The `app-<app id>.service`
+ * shape is what xdg-desktop-portal parses the application id out of, which is how
+ * the desktop attributes the ctrl+` global shortcut; see config/ of the repo.
+ */
+export const GHOSTTY_UNIT = `app-${GHOSTTY_CLASS}.service`;
 export const LOBBY_SESSION = 'lobby';

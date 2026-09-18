@@ -6,8 +6,8 @@
   ],
   "scripts": {
     "build": "bun run --filter '*' build",
-    "test": "vitest run",
-    "typecheck": "tsc -b",
+    "test": "bun --bun x vitest run",
+    "typecheck": "bun --bun x tsc -b",
     "package": "bun run --filter vscode-tmux-extension package"
   },
   "devDependencies": {
@@ -17,6 +17,6 @@
     "vitest": "^3.0.0"
   },
   "engines": {
-    "node": ">=26"
+    "bun": ">=1.3"
   }
 }

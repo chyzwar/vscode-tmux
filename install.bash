@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
 # VS Code Tmux — one-shot installer for Ubuntu/Debian (Kubuntu 26.04 Plasma Wayland, Ubuntu 22.04 GNOME).
 #
-#   ./install.bash [--no-apt] [--no-vscode-deb] [--force-config]
+#   ./install.bash [--no-apt] [--no-vscode-deb] [--force-config] [--snap-ghostty]
 #
 # What it does (idempotent):
 #   1. apt: tmux, curl, unzip; xdotool only in an X11 session (a native Wayland VS Code is
 #      invisible to it; on Plasma the daemon raises windows through KWin scripting instead)
 #   2. VS Code as a .deb from Microsoft (needs sudo; skipped with --no-vscode-deb or if already a deb)
-#   3. Ghostty: apt when the archive has it (Ubuntu >= 26.04), otherwise prints a hint
-#   4. Bun (package manager, compiles the daemon), Node >= 26 via nodenv/nvm (esbuild, tsc,
-#      vitest, vsce), `bun install && bun run build`
+#   3. Ghostty >= 1.3 (the quake dropdown needs global keybinds on GTK): apt when the archive
+#      has it (Ubuntu >= 26.04), otherwise the snap; --snap-ghostty forces the snap
+#   4. Bun (package manager, daemon compiler, and the runtime for tsc/esbuild/vitest/vsce),
+#      `bun install && bun run build`
 #   5. CLI: copies the daemon binary to ~/.local/bin/vscode-tmux, symlinks ~/.local/bin/vscode
 #   6. Configs: ~/.config/vscode-tmux/{tmux.conf,ghostty.conf} (kept if present unless --force-config)
-#   7. Installs the extension .vsix into VS Code
-#   8. (Re)starts the daemon as a transient systemd user unit
+#   7. The quake dropdown: ~/.local/share/applications/dev.vscodetmux.Ghostty.desktop and the
+#      systemd user unit app-dev.vscodetmux.Ghostty.service, enabled so ctrl+` works from login
+#   8. Installs the extension .vsix into VS Code
+#   9. (Re)starts the daemon as a transient systemd user unit
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NO_APT=0; NO_VSCODE_DEB=0; FORCE_CONFIG=0
+NO_APT=0; NO_VSCODE_DEB=0; FORCE_CONFIG=0; SNAP_GHOSTTY=0
 for arg in "$@"; do
   case "$arg" in
     --no-apt) NO_APT=1 ;;
     --no-vscode-deb) NO_VSCODE_DEB=1 ;;
     --force-config) FORCE_CONFIG=1 ;;
+    --snap-ghostty) SNAP_GHOSTTY=1 ;;
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -42,7 +46,7 @@ if [[ $NO_APT -eq 0 ]]; then
   if command -v apt-get >/dev/null; then
     wanted=(tmux curl unzip)
     [[ $session_type == x11 ]] && wanted+=(xdotool)
-    if ! command -v ghostty >/dev/null && apt_has_candidate ghostty; then wanted+=(ghostty); fi
+    if [[ $SNAP_GHOSTTY -eq 0 ]] && ! command -v ghostty >/dev/null && apt_has_candidate ghostty; then wanted+=(ghostty); fi
     missing=()
     for pkg in "${wanted[@]}"; do dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg"); done
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -88,34 +92,29 @@ if [[ $NO_VSCODE_DEB -eq 0 ]]; then
 fi
 
 # 3. Ghostty -----------------------------------------------------------------
+# apt is preferred: the snap is a classic snap that runs in its own systemd scope,
+# so xdg-desktop-portal attributes the ctrl+` shortcut to the snap ("Ghostty" in
+# System Settings) rather than to this companion. Both work.
+if ! command -v ghostty >/dev/null && command -v snap >/dev/null && [[ $NO_APT -eq 0 || $SNAP_GHOSTTY -eq 1 ]]; then
+  log "installing the Ghostty snap (classic)"
+  sudo snap install ghostty --classic || warn "snap install ghostty failed"
+  hash -r
+fi
 if command -v ghostty >/dev/null; then
   log "Ghostty: $(ghostty --version 2>/dev/null | head -n 1)"
 else
-  warn "Ghostty not found. Install it ('sudo apt install ghostty' on Ubuntu >= 26.04, 'sudo snap install ghostty --classic', or the ghostty-ubuntu .deb) and re-run."
+  warn "Ghostty not found. Install it ('sudo snap install ghostty --classic', 'sudo apt install ghostty' on Ubuntu >= 26.04, or the ghostty-ubuntu .deb) and re-run."
 fi
 
-# 4. Bun / Node / build ----------------------------------------------------
+# 4. Bun / build -------------------------------------------------------------
 export PATH="$HOME/.bun/bin:$PATH"
 if ! command -v bun >/dev/null; then
-  log "installing Bun (compiles the daemon; only touches ~/.bun and your shell rc)"
+  log "installing Bun (runs the whole toolchain; only touches ~/.bun and your shell rc)"
   curl -fsSL https://bun.sh/install | bash
   hash -r
 fi
 command -v bun >/dev/null || die "bun not found after install; install Bun (https://bun.sh) and re-run"
 log "bun $(bun --version)"
-if [[ -n "${NODENV_ROOT:-}" || -d "$HOME/.nodenv" ]]; then
-  export PATH="$HOME/.nodenv/bin:$HOME/.nodenv/shims:$PATH"
-  eval "$(nodenv init - 2>/dev/null || true)"
-fi
-if ! command -v node >/dev/null; then die "node not found; install Node >= 26 (nodenv/nvm/apt) and re-run (esbuild, tsc, vitest and vsce run on Node)"; fi
-node_major="$(node -p 'process.versions.node.split(".")[0]')"
-if (( node_major < 26 )); then
-  if command -v nodenv >/dev/null && nodenv versions --bare 2>/dev/null | grep -q '^26\.'; then
-    log "using node $(nodenv versions --bare | grep '^26\.' | tail -n 1) from nodenv"
-  else
-    warn "node $node_major found; the build tooling targets Node >= 26 (the repo pins 26 via .node-version)"
-  fi
-fi
 cd "$REPO"
 log "bun install && bun run build"
 bun install --frozen-lockfile
@@ -144,8 +143,57 @@ for f in tmux.conf ghostty.conf; do
     log "kept existing ~/.config/vscode-tmux/$f (use --force-config to overwrite)"
   fi
 done
+# A running tmux server keeps the config it started with, so re-apply options and
+# key bindings (the mouse click-to-open bindings live there) without killing it.
+if tmux -L vscode-tmux has-session 2>/dev/null; then
+  tmux -L vscode-tmux source-file "$HOME/.config/vscode-tmux/tmux.conf" 2>/dev/null \
+    && log "reloaded tmux.conf into the running vscode-tmux server" \
+    || warn "could not source tmux.conf into the running server; restart it with: tmux -L vscode-tmux kill-server"
+fi
 
-# 7. Extension ---------------------------------------------------------------
+# 7. Quake dropdown: desktop entry + companion Ghostty user unit --------------
+# The companion runs windowless in the background and ctrl+` toggles Ghostty's
+# quick terminal. Two files have to be exact:
+#   - the unit is named app-<app id>.service, which is how xdg-desktop-portal
+#     derives the application id of a host (non-flatpak) process;
+#   - a matching <app id>.desktop must exist or that lookup falls back to no id,
+#     and KDE then cannot attribute (or remember) the global shortcut.
+apps_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+units_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+ghostty_unit="app-dev.vscodetmux.Ghostty.service"
+mkdir -p "$apps_dir" "$units_dir"
+install -m 0644 "$REPO/config/dev.vscodetmux.Ghostty.desktop" "$apps_dir/dev.vscodetmux.Ghostty.desktop"
+install -m 0644 "$REPO/config/$ghostty_unit" "$units_dir/$ghostty_unit"
+command -v update-desktop-database >/dev/null && update-desktop-database "$apps_dir" 2>/dev/null || true
+log "installed $apps_dir/dev.vscodetmux.Ghostty.desktop and $units_dir/$ghostty_unit"
+
+ghostty_version="$(ghostty --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+case "$ghostty_version" in
+  '') ;;
+  1.[0-2].*) warn "Ghostty $ghostty_version: the quake dropdown needs 1.3+ (global keybinds on GTK). ctrl+\` will not work." ;;
+esac
+if [[ "$desktop" == *GNOME* ]]; then
+  warn "GNOME: the quick terminal needs wlr-layer-shell, which Mutter does not implement. The companion will open a normal window instead."
+fi
+
+if command -v systemctl >/dev/null; then
+  systemctl --user daemon-reload
+  if command -v ghostty >/dev/null; then
+    systemctl --user enable "$ghostty_unit" >/dev/null 2>&1 || warn "could not enable $ghostty_unit"
+    if systemctl --user is-active --quiet "$ghostty_unit"; then
+      log "restarting companion Ghostty on the new config"
+      systemctl --user restart "$ghostty_unit" || warn "restart failed; see: systemctl --user status $ghostty_unit"
+    else
+      systemctl --user start "$ghostty_unit" || warn "could not start $ghostty_unit; see: journalctl --user -u $ghostty_unit"
+    fi
+  else
+    warn "Ghostty missing: installed $ghostty_unit but not starting it"
+  fi
+else
+  warn "no systemctl: start the companion yourself with 'ghostty --class=dev.vscodetmux.Ghostty --config-file=$HOME/.config/vscode-tmux/ghostty.conf'"
+fi
+
+# 8. Extension ---------------------------------------------------------------
 vsix="$REPO/packages/extension/vscode-tmux.vsix"
 if command -v code >/dev/null; then
   log "installing extension into $(command -v code)"
@@ -154,7 +202,7 @@ else
   warn "'code' not on PATH; install the extension manually: code --install-extension $vsix"
 fi
 
-# 8. (Re)start the daemon on the new build --------------------------------------
+# 9. (Re)start the daemon on the new build --------------------------------------
 unit="vscode-tmux-$(id -u)"
 sock="/run/user/$(id -u)/vscode-tmux.sock"
 if [[ -S "$sock" ]]; then
@@ -179,8 +227,12 @@ cat <<EOT
 
 Done. Next:
   1. Reload your VS Code windows (Developer: Reload Window) so the extension connects.
-  2. Focus a VS Code window: a Ghostty window titled "VS Code Tmux" appears with that workspace's tabs.
+  2. Press ctrl+\` : Ghostty drops down from the top with the tabs of the focused VS Code window.
+     The first time, Plasma asks whether "VS Code Tmux Terminal" may register global shortcuts — accept it.
+     The binding then lives in System Settings > Shortcuts > VS Code Tmux Terminal (CTRL+grave).
   3. In a tab run:  vscode src/some/file.ts:42
-  Diagnostics: vscode-tmux status, vscode-tmux list, ~/.local/state/vscode-tmux/daemon.log
-  Plasma: pin the companion with a KWin window rule on app id dev.vscodetmux.Ghostty (System Settings > Window Rules).
+  Diagnostics: vscode-tmux status, vscode-tmux toggle, journalctl --user -u $ghostty_unit,
+               ~/.local/state/vscode-tmux/daemon.log
+  Dropdown size/position: quick-terminal-* in ~/.config/vscode-tmux/ghostty.conf, then
+               systemctl --user restart $ghostty_unit
 EOT

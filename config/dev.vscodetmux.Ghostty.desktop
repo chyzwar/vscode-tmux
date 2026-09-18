@@ -1,0 +1,16 @@
+# Installed as ~/.local/share/applications/dev.vscodetmux.Ghostty.desktop.
+# Not meant to be launched from the menu (NoDisplay): it exists so the desktop
+# can resolve the companion window's app id (dev.vscodetmux.Ghostty) to a name
+# and an icon — xdg-desktop-portal needs it to attribute the ctrl+` global
+# shortcut, and KWin uses it for the task manager entry and window rules.
+[Desktop Entry]
+Type=Application
+Name=VS Code Tmux Terminal
+GenericName=Terminal
+Comment=Ghostty companion window for VS Code Tmux
+Exec=ghostty --class=dev.vscodetmux.Ghostty
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupWMClass=dev.vscodetmux.Ghostty
+NoDisplay=true

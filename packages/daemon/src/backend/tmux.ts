@@ -100,6 +100,19 @@ export class TmuxBackend implements SessionBackend {
     await this.must(['switch-client', '-E', '-c', tty, '-t', `=${session}`]);
   }
 
+  /**
+   * Hooks that switch the next client (the quake dropdown) to `session` the moment
+   * it attaches. Two are needed: `client-attached` fires when it attaches to an
+   * existing session, `session-created` when its `new-session -A` created one.
+   * The `if` guard keeps the hook from firing on the session it just switched to.
+   */
+  async setAttachTarget(session: string): Promise<void> {
+    const command = `if -F '#{!=:#{client_session},${session}}' 'switch-client -E -t =${session}'`;
+    for (const hook of ['client-attached', 'session-created']) {
+      await this.must(['set-hook', '-g', hook, command], true);
+    }
+  }
+
   attachCommand(session: string): string[] {
     return ['tmux', ...this.base(true), 'new-session', '-A', '-s', session];
   }

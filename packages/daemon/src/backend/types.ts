@@ -46,6 +46,12 @@ export interface SessionBackend {
   selectTab(session: string, tabId: string): Promise<void>;
   listClients(): Promise<Client[]>;
   switchClient(tty: string, session: string): Promise<void>;
+  /**
+   * Point the *next* client that attaches at `session`. The presenter cannot
+   * make a dropdown terminal attach on demand (the user does, with the hotkey),
+   * so the target has to be waiting in the backend when that happens.
+   */
+  setAttachTarget(session: string): Promise<void>;
   /** argv a terminal should run to attach a client (creating `session` if needed). */
   attachCommand(session: string): string[];
 }

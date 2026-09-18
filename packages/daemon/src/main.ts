@@ -3,8 +3,11 @@ import { randomUUID } from 'node:crypto';
 import type { Message, ResultMessage } from '@vscode-tmux/protocol';
 import { resolve } from 'node:path';
 import { runDaemon } from './daemon.js';
+import { realExec } from './exec.js';
 import { computeWorkspaceId } from './ids.js';
-import { socketPath } from './paths.js';
+import { GHOSTTY_CLASS, GHOSTTY_UNIT, socketPath } from './paths.js';
+import { findQuakeShortcut, toggleQuake } from './quake.js';
+import { parseClickTarget } from './target.js';
 import { tryConnect } from './transport.js';
 
 const USAGE = `vscode-tmux — VS Code ⇄ Ghostty/tmux companion
@@ -14,6 +17,9 @@ Usage:
   vscode-tmux open <target>           open path[:line[:col]] in this terminal's VS Code window
   vscode-tmux new [name] [-- cmd...]  create a terminal tab in this terminal's workspace
   vscode-tmux show [path]             show the session of the workspace at path (default: cwd) in Ghostty
+  vscode-tmux toggle                  pull the Ghostty dropdown down / up (same as ctrl+\`)
+  vscode-tmux click --session=S --cwd=D --word=W [--link=U] [--keep]
+                                      open what was clicked in a tab (bound to the mouse in tmux.conf)
   vscode-tmux list                    list workspaces, sessions and tabs
   vscode-tmux status                  daemon / tmux / Ghostty status
 
@@ -85,6 +91,54 @@ async function show(args: string[]): Promise<void> {
   process.stdout.write(`showing ${(reply.data as { sessionName: string }).sessionName}\n`);
 }
 
+/**
+ * Press the dropdown's global shortcut through kglobalaccel. Ghostty has no IPC
+ * for `toggle_quick_terminal`, so this only works where the desktop registered
+ * the `global:` keybind for us (Plasma).
+ */
+/**
+ * Open the file the user clicked on in a terminal tab.
+ *
+ * tmux runs this from a mouse binding, so it hands us the session (not the
+ * workspace: the binding runs outside the shell and never sees its environment),
+ * the pane's directory, the word under the pointer and the OSC 8 link if the
+ * program emitted one. Anything that is not an existing file is silently
+ * ignored — a click on prose must do nothing.
+ */
+async function click(args: string[]): Promise<void> {
+  const flag = (name: string) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? '';
+  const cwd = flag('cwd') || process.cwd();
+  const target = parseClickTarget(flag('word'), flag('link'), cwd);
+  if (!target) return;
+
+  const msg: Message = { type: 'open', id: randomUUID(), cwd, target: gotoArg(target) };
+  const session = flag('session');
+  if (session) msg.sessionName = session;
+  const reply = await request(msg);
+  if (!reply.ok) fail(reply.error ?? 'open failed');
+  // The dropdown covers the editor it just raised, so get out of the way.
+  if (!args.includes('--keep')) await toggleQuake(realExec, GHOSTTY_CLASS).catch(() => undefined);
+}
+
+const gotoArg = (t: { path: string; line?: number; col?: number }): string =>
+  t.path + (t.line !== undefined ? `:${t.line}` + (t.col !== undefined ? `:${t.col}` : '') : '');
+
+async function toggle(): Promise<void> {
+  const found = await toggleQuake(realExec, GHOSTTY_CLASS);
+  if (found) {
+    process.stdout.write(`toggled ${found.action}\n`);
+    return;
+  }
+  const active = (await realExec('systemctl', ['--user', 'is-active', GHOSTTY_UNIT])).stdout.trim() || 'unknown';
+  fail(
+    `no global shortcut registered for ${GHOSTTY_CLASS} (${GHOSTTY_UNIT}: ${active}).\n` +
+      `  - is the companion running?  systemctl --user status ${GHOSTTY_UNIT}\n` +
+      "  - Plasma asks once whether Ghostty may register global shortcuts; accept it, then check\n" +
+      '    System Settings > Shortcuts > VS Code Tmux Terminal.\n' +
+      '  - other desktops: press ctrl+` yourself, this command is Plasma-only.',
+  );
+}
+
 async function list(): Promise<void> {
   const reply = await request({ type: 'list', id: randomUUID() });
   if (!reply.ok) fail(reply.error ?? 'list failed');
@@ -107,7 +161,10 @@ async function status(): Promise<void> {
   }
   conn.close();
   const reply = await request({ type: 'status', id: randomUUID() });
-  process.stdout.write(JSON.stringify(reply.data, null, 2) + '\n');
+  const unit = (await realExec('systemctl', ['--user', 'is-active', GHOSTTY_UNIT])).stdout.trim() || 'unknown';
+  const shortcut = await findQuakeShortcut(realExec, GHOSTTY_CLASS);
+  const data = { ...(reply.data as object), ghostty: { unit: `${GHOSTTY_UNIT}: ${unit}`, globalShortcut: shortcut?.action ?? 'not registered' } };
+  process.stdout.write(JSON.stringify(data, null, 2) + '\n');
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -122,6 +179,10 @@ async function main(argv: string[]): Promise<void> {
       return newTab(rest);
     case 'show':
       return show(rest);
+    case 'toggle':
+      return toggle();
+    case 'click':
+      return click(rest);
     case 'list':
       return list();
     case 'status':

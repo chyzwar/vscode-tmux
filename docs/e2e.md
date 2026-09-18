@@ -4,14 +4,15 @@ Prerequisites: `./install.bash` ran (it installs the compiled daemon binary at `
 
 | # | Step | Expected |
 |---|------|----------|
-| 1 | Open two folders in two VS Code windows (A, B). | `vscode-tmux list` shows both, each with a `Shell` tab. A Ghostty window titled "VS Code Tmux" appears showing the focused workspace. `tmux -L vscode-tmux ls` lists `lobby`, `<a>-<id>`, `<b>-<id>`. |
+| 1 | Open two folders in two VS Code windows (A, B), then press ctrl+`. | `vscode-tmux list` shows both, each with a `Shell` tab. The Ghostty dropdown slides down showing the focused workspace. `tmux -L vscode-tmux ls` lists `lobby`, `<a>-<id>`, `<b>-<id>`. |
 | 2 | In A run `VS Code Tmux: Create Terminal` twice (names `Claude`, `Server`). | Ghostty's tab bar shows `1 Shell  2 Claude  3 Server`, Server selected. `alt+2` selects Claude; clicking a tab selects it. |
 | 3 | Click B's window, then A's window. | Ghostty switches to B's tabs within ~100 ms, then back to A with the previously selected tab still selected. |
 | 4 | In an A tab start `sleep 1000`; switch to B and back. | `sleep` still running (`vscode-tmux list` shows `(sleep)`). |
 | 5 | In an A tab: `vscode README.md:3:2`, while B is the active VS Code window. | README.md opens at 3:2 in window A and window A is raised. `vscode .` raises A. From a B tab the same opens in B. |
+| 5b | In an A tab run `bun run typecheck` (or anything printing `file:line`), then ctrl+click or alt+click a path. | The file opens at that line in window A, A is raised, the dropdown hides. Ctrl+clicking a word that is not a file does nothing. |
 | 6 | Close window A. | `tmux -L vscode-tmux ls` still lists A's session; `sleep` still alive. |
 | 7 | Reopen folder A. | Extension output says "reattached"; Ghostty shows the same tabs; no new session. |
-| 8 | Close the Ghostty window; click a VS Code window. | Ghostty is relaunched by the daemon and shows that workspace. |
+| 8 | `systemctl --user stop app-dev.vscodetmux.Ghostty.service`, then focus a VS Code window and press ctrl+`. | The daemon starts the unit again and the dropdown shows that workspace. |
 | 9 | `bun run test` | all green. |
 
 Automated smoke test without VS Code (used during development): `scratchpad/fake-ext.mjs` speaks the protocol; see `packages/daemon/test/server.test.ts` for the message flow.
@@ -49,3 +50,18 @@ Pending user verification after reloading VS Code windows: steps 2, 3, 6, 7, 8 i
 | 4 | Same with A minimized / on another virtual desktop. | KWin unminimizes / switches desktop. |
 | 5 | `busctl --user status org.kde.KWin` and `busctl --user --json=short call org.kde.KWin /Scripting org.kde.kwin.Scripting isScriptLoaded s vscode-tmux-raise` after an open. | KWin owns the name; the script is unloaded again (`false`). |
 | 6 | Ghostty quick terminal (optional): set `quick-terminal-*` keys in `~/.config/vscode-tmux/ghostty.conf`. | Works on KWin (layer-shell), unlike GNOME. |
+
+## Results 2026-09-18 (Kubuntu 26.04, Plasma 6.6.6 Wayland, Ghostty 1.3.1 snap, tmux 3.6, VS Code 1.138 .deb)
+
+Quake dropdown, verified on the machine (not only in tests):
+- `app-dev.vscodetmux.Ghostty.service` starts with `Type=notify` (Ghostty sends `READY=1`), stays `active` with no window, and survives its tmux session being killed.
+- The portal registered the global keybind: kglobalaccel action `CTRL+grave` → `toggle_quick_terminal`, keys `0x4000060`. Invoking it creates the quick terminal, which attaches an `xterm-ghostty` tmux client.
+- With a workspace parked by the daemon (protocol-level `hello`), reopening the dropdown attaches straight to that workspace's session; a live focus change switches the attached client.
+- `vscode-tmux click` on `README.md:3:1`, on `file://…/package.json#L5` (OSC 8) and on the word `the`: opened + raised, opened at line 5, and did nothing, respectively.
+- `bun run test` 127 green, on the Bun runtime (no Node installed for the toolchain).
+
+Notes found on the way:
+- Ghostty 1.3's `link` option is not settable ("TODO: This can't currently be set!"), and `+validate-config --link=…` exits 1: custom click patterns must live in tmux, not Ghostty.
+- `client-attached` does **not** fire when the attaching `new-session -A` creates the session; `session-created` covers that path. Both hooks are set, guarded with `if -F` so the switch does not re-trigger.
+- With the Ghostty **snap**, xdg-desktop-portal attributes the shortcut to the snap (`ghostty_ghostty`), not to `dev.vscodetmux.Ghostty`; the app-id/unit-name/desktop-entry trio only applies to a host (deb) install.
+- tmux's default `word-separators` splits on `/`, `.` and `:`, so `#{mouse_word}` returned fragments; the companion server now sets `word-separators ' '`.

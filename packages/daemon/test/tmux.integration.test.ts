@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -50,4 +51,37 @@ describe.skipIf(!hasTmux)('TmuxBackend against a real tmux server', () => {
     expect(await backend.listClients()).toEqual([]);
     expect(backend.attachCommand('lobby')).toEqual(['tmux', '-L', socketName, '-f', configPath, 'new-session', '-A', '-s', 'lobby']);
   });
+
+  /**
+   * The quake dropdown attaches when the user presses the hotkey, not when the
+   * daemon says so, which is why `show()` parks the workspace in a hook instead
+   * of switching a client. Worth a real client: `switch-client` inside a hook
+   * targeting the attaching client is the whole load-bearing assumption.
+   */
+  it('switches a client that attaches later to the parked session', async () => {
+    await backend.createSession({ name: 'parked-xyz', cwd: dir, env: {}, firstTabName: 'Shell' });
+    await backend.setAttachTarget('parked-xyz');
+    // Note there is no `lobby` session here: the attach below creates it, which is
+    // the path `client-attached` alone does not cover.
+
+    // `script` gives the attaching tmux a pty; without one it refuses to attach.
+    const attach = spawn('script', ['-qec', backend.attachCommand('lobby').join(' '), '/dev/null'], { env: cleanEnv, stdio: 'ignore' });
+    try {
+      // The client is briefly on `lobby` before the hook runs, so poll for the switch.
+      const client = await waitFor(async () => (await backend.listClients()).find((c) => c.session === 'parked-xyz'));
+      expect(client.tty).toMatch(/^\/dev\//);
+    } finally {
+      attach.kill('SIGKILL');
+    }
+  });
 });
+
+async function waitFor<T>(probe: () => Promise<T | undefined>, timeoutMs = 5000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await probe();
+    if (value !== undefined) return value;
+    if (Date.now() >= deadline) throw new Error('timed out waiting for the attaching client to be switched');
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}

@@ -8,8 +8,9 @@ import { fileLogger } from './log.js';
 import { Opener } from './opener.js';
 import { Registry } from './registry.js';
 import { GhosttyPresenter } from './presenter/ghostty.js';
+import { selectRunner, type GhosttyRunner } from './presenter/runner.js';
 import { selectRaiser, type WindowRaiser } from './raise/index.js';
-import { GHOSTTY_CLASS, LOBBY_SESSION, TMUX_SOCKET_NAME, configDir, socketPath, stateDir } from './paths.js';
+import { GHOSTTY_CLASS, GHOSTTY_UNIT, LOBBY_SESSION, TMUX_SOCKET_NAME, configDir, socketPath, stateDir } from './paths.js';
 import { DaemonServer } from './server.js';
 import { ghosttyEnvFor, loadSettings } from './settings.js';
 import { AlreadyRunningError, listen, type SocketConnection } from './transport.js';
@@ -29,28 +30,41 @@ export async function runDaemon(o: DaemonOptions = {}): Promise<void> {
   const ghosttyConfig = join(configDir(), 'ghostty.conf');
   const settings = loadSettings(join(configDir(), 'config.json'));
   log(`settings: ${JSON.stringify(settings)}`);
+  const exec: Exec = (cmd, args, opts) => realExec(cmd, args, { ...opts, env: opts?.env ?? env });
 
-  const backend = new TmuxBackend({ exec: realExec, socketName: TMUX_SOCKET_NAME, configPath: tmuxConfig, env });
+  const backend = new TmuxBackend({ exec, socketName: TMUX_SOCKET_NAME, configPath: tmuxConfig, env });
+  const ghosttyEnv = { ...env, ...ghosttyEnvFor(settings, env) };
+  const spawnGhostty = (cmd: string, args: string[], spawnEnv: NodeJS.ProcessEnv) => {
+    log(`launching ${cmd} ${args.join(' ')}`);
+    // Keep Ghostty's own stderr: it is the only place GTK/Wayland startup errors show up.
+    const out = openSync(join(dir, 'ghostty.log'), 'a');
+    const child = spawn(cmd, args, { env: spawnEnv, detached: true, stdio: ['ignore', out, out] });
+    child.on('error', (err) => log(`failed to launch ${cmd}: ${err.message}`));
+    child.on('exit', (code, signal) => log(`${cmd} exited code=${code} signal=${signal}`));
+    child.unref();
+    closeSync(out);
+  };
+  let runner: GhosttyRunner | undefined;
   const presenter = new GhosttyPresenter({
     backend,
-    env: { ...env, ...ghosttyEnvFor(settings, env) },
-    timeoutMs: settings.ghosttyStartTimeoutMs,
-    configPath: ghosttyConfig,
-    appClass: GHOSTTY_CLASS,
     lobbySession: LOBBY_SESSION,
-    spawn: (cmd, args, spawnEnv) => {
-      log(`launching ${cmd} ${args.join(' ')}`);
-      // Keep Ghostty's own stderr: it is the only place GTK/Wayland startup errors show up.
-      const out = openSync(join(dir, 'ghostty.log'), 'a');
-      const child = spawn(cmd, args, { env: spawnEnv, detached: true, stdio: ['ignore', out, out] });
-      child.on('error', (err) => log(`failed to launch ${cmd}: ${err.message}`));
-      child.on('exit', (code, signal) => log(`${cmd} exited code=${code} signal=${signal}`));
-      child.unref();
-      closeSync(out);
-    },
+    home: env.HOME ?? '/',
+    log,
+    // Probed on first use and kept; the unit may be installed while we run.
+    runner: async () =>
+      (runner ??= await selectRunner({
+        exec,
+        startTimeoutMs: settings.ghosttyStartTimeoutMs,
+        spawn: spawnGhostty,
+        env: ghosttyEnv,
+        configPath: ghosttyConfig,
+        appClass: GHOSTTY_CLASS,
+        command: backend.attachCommand(LOBBY_SESSION),
+        unit: GHOSTTY_UNIT,
+        log,
+      })),
   });
   const registry = new Registry();
-  const exec: Exec = (cmd, args, opts) => realExec(cmd, args, { ...opts, env: opts?.env ?? env });
   let raiser: WindowRaiser | undefined;
   const opener = new Opener({
     registry,

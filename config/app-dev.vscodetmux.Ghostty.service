@@ -1,0 +1,27 @@
+# Companion Ghostty for VS Code Tmux, installed as
+# ~/.config/systemd/user/app-dev.vscodetmux.Ghostty.service
+#
+# Do not rename this unit. xdg-desktop-portal derives an application id from the
+# systemd user unit name (`app-<app id>.service`, see xdp-app-info-host.c) and
+# needs a matching dev.vscodetmux.Ghostty.desktop; that id is what KDE files the
+# ctrl+` global shortcut under, so a rename loses the shortcut binding.
+[Unit]
+Description=Ghostty companion terminal for VS Code Tmux (quake dropdown)
+Documentation=man:ghostty(1)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# Ghostty sends READY=1 once its run loop is up, so `systemctl start` only
+# returns when the global shortcut is actually registered.
+Type=notify
+TimeoutStartSec=20
+Slice=app.slice
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin
+ExecStart=/usr/bin/env ghostty --class=dev.vscodetmux.Ghostty --config-file=%h/.config/vscode-tmux/ghostty.conf
+ExecReload=/usr/bin/env kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,18 +1,16 @@
 import type { Client, SessionBackend } from '../backend/types.js';
+import type { Log } from '../log.js';
+import type { GhosttyRunner } from './runner.js';
 import type { Presenter } from './types.js';
-
-export type Spawn = (cmd: string, args: string[], env: NodeJS.ProcessEnv) => void;
 
 export interface GhosttyPresenterOptions {
   backend: SessionBackend;
-  spawn: Spawn;
-  env: NodeJS.ProcessEnv;
-  configPath: string;
-  appClass: string;
+  /** Probed on first use and kept (systemd unit or plain spawn). */
+  runner: () => Promise<GhosttyRunner>;
   lobbySession: string;
-  sleep?: (ms: number) => Promise<void>;
-  timeoutMs?: number;
-  pollMs?: number;
+  /** cwd of the lobby session. */
+  home: string;
+  log?: Log;
 }
 
 /** The client that represents the Ghostty surface: non-control, preferably xterm-ghostty. */
@@ -21,65 +19,56 @@ export function pickClient(clients: Client[]): Client | undefined {
   return candidates.find((c) => c.termname === 'xterm-ghostty') ?? candidates[0];
 }
 
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
 /**
- * Ghostty as a single-surface container. One Ghostty instance (own class and
- * config) runs one tmux client attached to the lobby session; showing a
- * workspace is a `switch-client` on that client. tmux draws the tab bar.
+ * Ghostty as a quake dropdown. The companion instance runs windowless in the
+ * background; ctrl+` (a global keybind through the XDG GlobalShortcuts portal)
+ * toggles its quick terminal, and that surface runs one tmux client.
+ *
+ * The daemon therefore never opens the window — the user does, at a moment we
+ * do not control. Showing a workspace is two things: `switch-client` for the
+ * client that is attached right now, and an attach target in the backend for
+ * the client that attaches the next time the dropdown is pulled down.
  */
 export class GhosttyPresenter implements Presenter {
-  private readonly sleep: (ms: number) => Promise<void>;
-  private readonly timeoutMs: number;
-  private readonly pollMs: number;
-  private launching: Promise<Client> | undefined;
+  private starting: Promise<void> | undefined;
 
-  constructor(private readonly o: GhosttyPresenterOptions) {
-    this.sleep = o.sleep ?? defaultSleep;
-    this.timeoutMs = o.timeoutMs ?? 5000;
-    this.pollMs = o.pollMs ?? 100;
-  }
+  constructor(private readonly o: GhosttyPresenterOptions) {}
 
   async ensureVisible(): Promise<void> {
-    await this.client();
+    await this.ensureRunning();
   }
 
   async show(session: string): Promise<void> {
-    const client = await this.client();
-    if (client.session === session) return;
-    await this.o.backend.switchClient(client.tty, session);
+    // Set the target first: the dropdown may be pulled down at any moment,
+    // including while we are starting Ghostty below.
+    await this.o.backend.setAttachTarget(session);
+    await this.ensureRunning();
+    const client = pickClient(await this.o.backend.listClients());
+    if (client && client.session !== session) await this.o.backend.switchClient(client.tty, session);
   }
 
-  /** Find the Ghostty client, launching Ghostty if there is none. Concurrent callers share one launch. */
-  private async client(): Promise<Client> {
-    const existing = pickClient(await this.o.backend.listClients());
-    if (existing) return existing;
-    if (!this.launching) {
-      this.launching = this.launch().finally(() => {
-        this.launching = undefined;
-      });
-    }
-    return this.launching;
+  /** Make sure the companion process is up. Concurrent callers share one start. */
+  private async ensureRunning(): Promise<void> {
+    if (this.starting) return this.starting;
+    this.starting = this.startOnce().finally(() => {
+      this.starting = undefined;
+    });
+    return this.starting;
   }
 
-  private async launch(): Promise<Client> {
+  private async startOnce(): Promise<void> {
+    const runner = await this.o.runner();
+    if (await runner.isRunning()) return;
+    await this.ensureLobby();
+    this.o.log?.(`starting companion Ghostty (${runner.name})`);
+    await runner.start();
+  }
+
+  /** What the dropdown attaches to before any VS Code window has claimed it. */
+  private async ensureLobby(): Promise<void> {
     const { backend, lobbySession } = this.o;
     await backend.ensureServer();
-    if (!(await backend.hasSession(lobbySession))) {
-      await backend.createSession({ name: lobbySession, cwd: this.o.env.HOME ?? '/', env: {}, firstTabName: 'Shell' });
-    }
-    const attach = backend.attachCommand(lobbySession).join(' ');
-    this.o.spawn(
-      'ghostty',
-      [`--class=${this.o.appClass}`, '--gtk-single-instance=true', `--config-file=${this.o.configPath}`, `--command=${attach}`],
-      this.o.env,
-    );
-    const deadline = Date.now() + this.timeoutMs;
-    for (;;) {
-      const c = pickClient(await backend.listClients());
-      if (c) return c;
-      if (Date.now() >= deadline) throw new Error('no terminal client attached: Ghostty did not connect to tmux in time');
-      await this.sleep(this.pollMs);
-    }
+    if (await backend.hasSession(lobbySession)) return;
+    await backend.createSession({ name: lobbySession, cwd: this.o.home, env: {}, firstTabName: 'Shell' });
   }
 }

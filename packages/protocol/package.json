@@ -6,6 +6,6 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "tsc -b"
+    "build": "bun --bun x tsc -b"
   }
 }

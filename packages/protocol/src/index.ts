@@ -42,11 +42,17 @@ export interface ShowSessionMessage {
   workspaceId: WorkspaceId;
 }
 
-/** Sent by the `vscode` CLI from inside a terminal. */
+/** Sent by the `vscode` CLI from inside a terminal, and by the click handler. */
 export interface OpenMessage {
   type: 'open';
   id: string;
   workspaceId?: WorkspaceId;
+  /**
+   * The tmux session the request came from, used when there is no workspace id.
+   * A mouse click is delivered by tmux, which knows the session but not the
+   * environment of the shell inside it.
+   */
+  sessionName?: string;
   cwd: string;
   /** `path[:line[:col]]` or `.` */
   target: string;

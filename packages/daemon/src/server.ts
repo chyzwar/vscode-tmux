@@ -171,7 +171,8 @@ export class DaemonServer {
 
   private async onOpen(conn: Connection, msg: OpenMessage): Promise<void> {
     const input: OpenInput = { cwd: msg.cwd, target: msg.target };
-    if (msg.workspaceId) input.workspaceId = msg.workspaceId;
+    const workspaceId = msg.workspaceId ?? (msg.sessionName ? this.registry.bySession(msg.sessionName)?.workspaceId : undefined);
+    if (workspaceId) input.workspaceId = workspaceId;
     const outcome = await this.o.opener.open(input);
     this.reply(conn, msg.id, outcome);
   }

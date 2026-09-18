@@ -27,6 +27,12 @@ export class Registry {
     return this.records.get(id);
   }
 
+  /** Reverse lookup for requests that only know which tmux session they came from. */
+  bySession(sessionName: string): WorkspaceRecord | undefined {
+    for (const r of this.records.values()) if (r.sessionName === sessionName) return r;
+    return undefined;
+  }
+
   all(): WorkspaceRecord[] {
     return [...this.records.values()];
   }
