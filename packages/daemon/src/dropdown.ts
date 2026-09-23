@@ -47,9 +47,6 @@ export function parseWindowPaths(tree: string, appPath: string): string[] {
     .filter((l) => l.startsWith(prefix) && /^\d+$/.test(l.slice(prefix.length)));
 }
 
-/** Ghostty accepts `NN%` or `NNpx`, optionally `,` and a second one for the other axis. */
-export const isQuickTerminalSize = (v: unknown): v is string => typeof v === 'string' && /^\d+(px|%)(,\d+(px|%))?$/.test(v);
-
 const SIZE_LINE = /^[ \t]*quick-terminal-size[ \t]*=[ \t]*(.*?)[ \t]*$/m;
 
 export const currentQuickTerminalSize = (config: string): string | undefined => config.match(SIZE_LINE)?.[1];

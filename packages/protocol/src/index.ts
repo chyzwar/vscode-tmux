@@ -1,132 +1,33 @@
 /**
  * Wire protocol between the VS Code extension, the `vscode` CLI and the
  * vscode-tmux daemon. Newline-delimited JSON over a Unix domain socket.
- * Requests carry an `id`; replies (`result`, `openResult`) echo it.
+ * Requests carry an `id`; the one reply type, `result`, echoes it.
  */
+import * as z from 'zod';
+import { Message } from './messages.js';
 
-export type WorkspaceId = string;
-
-export interface HelloMessage {
-  type: 'hello';
-  id: string;
-  workspaceId: WorkspaceId;
-  /** Absolute path of the (first) workspace folder. */
-  folder: string;
-  /** Absolute path of the .code-workspace file, if any. */
-  workspaceFile?: string;
-  /** Human-readable workspace name (folder basename or workspace name). */
-  name: string;
-  extHostPid: number;
-  vscodePid?: number;
-  focused: boolean;
-}
-
-export interface FocusMessage {
-  type: 'focus';
-  workspaceId: WorkspaceId;
-  focused: boolean;
-}
-
-export interface CreateTerminalMessage {
-  type: 'createTerminal';
-  id: string;
-  workspaceId: WorkspaceId;
-  name?: string;
-  cwd?: string;
-  command?: string[];
-}
-
-export interface ShowSessionMessage {
-  type: 'showSession';
-  id: string;
-  workspaceId: WorkspaceId;
-}
-
-/** Sent by the `vscode` CLI from inside a terminal, and by the click handler. */
-export interface OpenMessage {
-  type: 'open';
-  id: string;
-  workspaceId?: WorkspaceId;
-  /**
-   * The tmux session the request came from, used when there is no workspace id.
-   * A mouse click is delivered by tmux, which knows the session but not the
-   * environment of the shell inside it.
-   */
-  sessionName?: string;
-  cwd: string;
-  /** `path[:line[:col]]` or `.` */
-  target: string;
-}
-
-export interface ListMessage {
-  type: 'list';
-  id: string;
-}
-
-export interface StatusMessage {
-  type: 'status';
-  id: string;
-}
-
-/** Daemon → extension: open this file in your window. */
-export interface OpenRequestMessage {
-  type: 'openRequest';
-  id: string;
-  path: string;
-  line?: number;
-  col?: number;
-}
-
-/** Extension → daemon: reply to `openRequest`. */
-export interface OpenResultMessage {
-  type: 'openResult';
-  id: string;
-  ok: boolean;
-  /** Predicted OS window title after the editor was shown (used to raise the window). */
-  title?: string;
-  error?: string;
-}
-
-/** Daemon → extension: does your window have OS focus right now? Answered with a `result` whose data is `{ focused: boolean }`. */
-export interface WindowStateRequestMessage {
-  type: 'windowStateRequest';
-  id: string;
-}
-
-export interface ResultMessage {
-  type: 'result';
-  id: string;
-  ok: boolean;
-  data?: unknown;
-  error?: string;
-}
-
-export type Message =
-  | HelloMessage
-  | FocusMessage
-  | CreateTerminalMessage
-  | ShowSessionMessage
-  | OpenMessage
-  | ListMessage
-  | StatusMessage
-  | OpenRequestMessage
-  | OpenResultMessage
-  | WindowStateRequestMessage
-  | ResultMessage;
-
-export type MessageType = Message['type'];
+export * from './messages.js';
+export * from './requests.js';
+export * from './rpc.js';
+export { scrubEnv } from './env.js';
 
 export function encode(msg: Message): string {
   return JSON.stringify(msg) + '\n';
 }
 
+/** Called for every line the decoder drops, with the offending line and why. */
+export type InvalidLine = (line: string, reason: string) => void;
+
 /**
  * Incremental decoder for newline-delimited JSON. Partial lines are buffered
- * until the terminating newline arrives. Lines that are not valid JSON objects
- * with a string `type` are dropped.
+ * until the terminating newline arrives. Every line is validated against the
+ * `Message` schema: invalid JSON, unknown message types and missing fields are
+ * dropped (reported through `onInvalid`), unknown keys are stripped.
  */
 export class NdjsonDecoder {
   private buffer = '';
+
+  constructor(private readonly onInvalid?: InvalidLine) {}
 
   push(chunk: Buffer | string): Message[] {
     this.buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -135,26 +36,25 @@ export class NdjsonDecoder {
     while ((nl = this.buffer.indexOf('\n')) !== -1) {
       const line = this.buffer.slice(0, nl);
       this.buffer = this.buffer.slice(nl + 1);
-      const msg = parseLine(line);
+      const msg = parseLine(line, this.onInvalid);
       if (msg) out.push(msg);
     }
     return out;
   }
 }
 
-function parseLine(line: string): Message | undefined {
+function parseLine(line: string, onInvalid?: InvalidLine): Message | undefined {
   const trimmed = line.trim();
   if (!trimmed) return undefined;
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(trimmed);
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      const rec = value as Record<string, unknown>;
-      if (typeof rec.type === 'string') return value as Message;
-    }
+    value = JSON.parse(trimmed);
   } catch {
-    // malformed line: skip
+    onInvalid?.(trimmed, 'invalid JSON');
+    return undefined;
   }
+  const r = Message.safeParse(value);
+  if (r.success) return r.data;
+  onInvalid?.(trimmed, z.prettifyError(r.error));
   return undefined;
 }
-
-export { scrubEnv } from './env.js';

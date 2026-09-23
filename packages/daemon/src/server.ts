@@ -1,10 +1,10 @@
-import type { CreateTerminalMessage, HelloMessage, Message, OpenMessage, ResultMessage } from '@vscode-tmux/protocol';
+import { errorResult, okResult, type CreateTerminalMessage, type DaemonRequestType, type HelloMessage, type Message, type OpenMessage, type OpenOutcome, type ResultOf, type WorkspaceRecord } from '@vscode-tmux/protocol';
 import type { SessionBackend } from './backend/types.js';
 import { sessionNameFor } from './ids.js';
 import type { Log } from './log.js';
-import type { OpenInput, OpenOutcome } from './opener.js';
+import type { OpenInput } from './opener.js';
 import type { Presenter } from './presenter/types.js';
-import { Registry, type Connection, type WorkspaceRecord } from './registry.js';
+import { Registry, type Connection } from './registry.js';
 import { loadState, saveState, type State } from './state.js';
 
 export interface OpenerLike {
@@ -57,28 +57,22 @@ export class DaemonServer {
         case 'showSession': {
           const rec = this.require(msg.workspaceId);
           this.scheduleShow(msg.workspaceId, 0);
-          return this.reply(conn, msg.id, { sessionName: rec.sessionName });
+          return this.reply(conn, msg, { sessionName: rec.sessionName });
         }
         case 'open':
           return await this.onOpen(conn, msg);
         case 'list':
-          return this.reply(conn, msg.id, await this.list());
+          return this.reply(conn, msg, await this.list());
         case 'status':
-          return this.reply(conn, msg.id, await this.status());
-        case 'openResult':
+          return this.reply(conn, msg, await this.status());
         case 'result':
         case 'openRequest':
         case 'windowStateRequest':
-          // replies are routed by the transport layer (SocketConnection); nothing to do here
+          // replies are matched by the transport layer; the other two are ours to send, not to receive
           return;
-        default: {
-          const unknown = msg as { type: string; id?: string };
-          if (unknown.id) this.replyError(conn, unknown.id, `unknown message type ${unknown.type}`);
-          return;
-        }
       }
     } catch (err) {
-      const id = (msg as { id?: string }).id;
+      const id = 'id' in msg ? msg.id : undefined;
       this.o.log(`error handling ${msg.type}: ${(err as Error).stack ?? err}`);
       if (id) this.replyError(conn, id, (err as Error).message);
     }
@@ -115,7 +109,7 @@ export class DaemonServer {
     const created = await this.ensureSession(record);
     this.o.log(`${created ? 'created' : 'reattached'} session ${sessionName} for ${msg.folder}`);
     await this.snapshot(msg.workspaceId);
-    this.reply(conn, msg.id, { sessionName, created });
+    this.reply(conn, msg, { sessionName, created });
     if (msg.focused) this.scheduleShow(msg.workspaceId, 0);
   }
 
@@ -165,7 +159,7 @@ export class DaemonServer {
     const tab = await this.o.backend.newTab(rec.sessionName, { name, cwd: msg.cwd ?? rec.folder, command: msg.command });
     await this.o.backend.selectTab(rec.sessionName, tab.id);
     await this.snapshot(msg.workspaceId, msg.command ? { name, command: msg.command } : undefined);
-    this.reply(conn, msg.id, { tab });
+    this.reply(conn, msg, { tab });
     this.scheduleShow(msg.workspaceId, 0);
   }
 
@@ -174,7 +168,7 @@ export class DaemonServer {
     const workspaceId = msg.workspaceId ?? (msg.sessionName ? this.registry.bySession(msg.sessionName)?.workspaceId : undefined);
     if (workspaceId) input.workspaceId = workspaceId;
     const outcome = await this.o.opener.open(input);
-    this.reply(conn, msg.id, outcome);
+    this.reply(conn, msg, outcome);
   }
 
   private async list() {
@@ -220,13 +214,12 @@ export class DaemonServer {
     saveState(this.o.stateFile, this.state);
   }
 
-  private reply(conn: Connection, id: string, data: unknown): void {
-    const msg: ResultMessage = { type: 'result', id, ok: true, data };
-    conn.send(msg);
+  /** `data` is checked against the result schema of `req.type` at compile time. */
+  private reply<T extends DaemonRequestType>(conn: Connection, req: { type: T; id: string }, data: ResultOf<T>): void {
+    conn.send(okResult(req, data));
   }
 
   private replyError(conn: Connection, id: string, error: string): void {
-    const msg: ResultMessage = { type: 'result', id, ok: false, error };
-    conn.send(msg);
+    conn.send(errorResult(id, error));
   }
 }

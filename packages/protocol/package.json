@@ -7,5 +7,8 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "bun --bun x tsc -b"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
   }
 }

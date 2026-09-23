@@ -96,6 +96,7 @@ export async function runDaemon(o: DaemonOptions = {}): Promise<void> {
         log(`socket path ${sock} was taken over by another daemon; exiting`);
         process.exit(0);
       },
+      log,
     });
   } catch (err) {
     if (err instanceof AlreadyRunningError) {

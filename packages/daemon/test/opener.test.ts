@@ -1,26 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import type { Message } from '@vscode-tmux/protocol';
+import { PendingRequests, type Message, type ResultMessage } from '@vscode-tmux/protocol';
 import { Opener, type WindowRaiser } from '../src/opener.js';
 import { escapeRegex } from '../src/raise/match.js';
 import { XdotoolRaiser } from '../src/raise/xdotool.js';
 import { Registry, type Connection } from '../src/registry.js';
 import { fakeExec } from './fakeExec.js';
 
-function fakeConnection(reply: (m: Message) => Message) {
+/** Replies go through the real requester, so a reply the schema rejects fails the test the way it would fail in production. */
+function fakeConnection(reply: (m: Message) => ResultMessage) {
   const received: Message[] = [];
+  const rpc = new PendingRequests((m) => {
+    received.push(m);
+    queueMicrotask(() => rpc.settle(reply(m)));
+  });
   const conn: Connection = {
     send(m) { received.push(m); },
-    async request(m) { received.push(m); return reply(m); },
+    request: (type, body, timeoutMs = 1000) => rpc.request(type, body, timeoutMs),
   };
   return { conn, received };
 }
 
+const idOf = (m: Message): string => ('id' in m ? m.id : '');
+const openReply = (title: string) => (m: Message): ResultMessage => ({ type: 'result', id: idOf(m), ok: true, data: { title } });
+
 const ws = { workspaceId: 'abc123', folder: '/w/project-a', name: 'project-a', sessionName: 'project-a-abc123' };
 
-function setup(o: { connected?: boolean; xdotool?: boolean; reply?: (m: Message) => Message; search?: (args: string[], n: number) => string } = {}) {
+function setup(o: { connected?: boolean; xdotool?: boolean; reply?: (m: Message) => ResultMessage; search?: (args: string[], n: number) => string } = {}) {
   const registry = new Registry();
   registry.upsert(ws);
-  const { conn, received } = fakeConnection(o.reply ?? ((m) => ({ type: 'openResult', id: (m as { id: string }).id, ok: true, title: 'App.tsx - project-a - Visual Studio Code' })));
+  const { conn, received } = fakeConnection(o.reply ?? openReply('App.tsx - project-a - Visual Studio Code'));
   if (o.connected !== false) registry.attach(ws.workspaceId, conn);
   let searches = 0;
   let focused = '';
@@ -77,8 +85,13 @@ describe('Opener', () => {
   });
 
   it('reports extension failures instead of throwing', async () => {
-    const { opener } = setup({ reply: (m) => ({ type: 'openResult', id: (m as { id: string }).id, ok: false, error: 'boom' }) });
+    const { opener } = setup({ reply: (m) => ({ type: 'result', id: idOf(m), ok: false, error: 'boom' }) });
     await expect(opener.open({ workspaceId: 'abc123', cwd: '/w', target: 'a.ts' })).rejects.toThrow(/boom/);
+  });
+
+  it('rejects a reply whose data does not match the openRequest result schema', async () => {
+    const { opener } = setup({ reply: (m) => ({ type: 'result', id: idOf(m), ok: true, data: { title: 7 } }) });
+    await expect(opener.open({ workspaceId: 'abc123', cwd: '/w', target: 'a.ts' })).rejects.toThrow(/malformed reply to openRequest/);
   });
 });
 
@@ -122,7 +135,7 @@ describe('Opener when the window never becomes active', () => {
   it('falls back to the code CLI', async () => {
     const registry = new Registry();
     registry.upsert(ws);
-    const { conn } = fakeConnection((m) => ({ type: 'openResult', id: (m as { id: string }).id, ok: true, title: 'T' }));
+    const { conn } = fakeConnection(openReply('T'));
     registry.attach(ws.workspaceId, conn);
     const { exec, calls } = fakeExec((cmd, args) => {
       if (cmd === 'xdotool' && args[0] === 'search') return { stdout: '5\n' };
@@ -140,9 +153,7 @@ describe('Opener with a compositor raiser (KWin path)', () => {
     const registry = new Registry();
     registry.upsert(ws);
     const { conn, received } = fakeConnection((m) =>
-      m.type === 'windowStateRequest'
-        ? { type: 'result', id: m.id, ok: true, data: { focused } }
-        : { type: 'openResult', id: (m as { id: string }).id, ok: true, title: 'T - project-a - Code' },
+      m.type === 'windowStateRequest' ? { type: 'result', id: m.id, ok: true, data: { focused } } : openReply('T - project-a - Code')(m),
     );
     registry.attach(ws.workspaceId, conn);
     const seen: string[] = [];

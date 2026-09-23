@@ -1,17 +1,9 @@
-import type { Message } from '@vscode-tmux/protocol';
+import type { Message, Reply, RequestBody, RequestType, ResultOf, WorkspaceRecord } from '@vscode-tmux/protocol';
 
-export interface WorkspaceRecord {
-  workspaceId: string;
-  folder: string;
-  workspaceFile?: string;
-  name: string;
-  sessionName: string;
-}
-
-/** A live peer (an extension host) we can push messages to and await replies from. */
+/** A live peer (an extension host) we can push messages to and await typed replies from. */
 export interface Connection {
   send(msg: Message): void;
-  request(msg: Message, timeoutMs?: number): Promise<Message>;
+  request<T extends RequestType>(type: T, body: RequestBody<T>, timeoutMs?: number): Promise<Reply<ResultOf<T>>>;
 }
 
 /** In-memory map of known workspaces and which of them currently have a VS Code window connected. */

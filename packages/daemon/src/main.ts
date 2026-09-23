@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import type { Message, ResultMessage } from '@vscode-tmux/protocol';
+import type { DaemonRequestType, Reply, RequestBody, ResultOf } from '@vscode-tmux/protocol';
 import { join, resolve } from 'node:path';
 import { Command } from 'commander';
 import { peelCommand } from './cliargs.js';
@@ -14,11 +13,11 @@ import { loadSettings } from './settings.js';
 import { parseClickTarget } from './target.js';
 import { tryConnect } from './transport.js';
 
-async function request(msg: Message): Promise<ResultMessage> {
+async function request<T extends DaemonRequestType>(type: T, body: RequestBody<T>): Promise<Reply<ResultOf<T>>> {
   const conn = await tryConnect(socketPath());
   if (!conn) throw new Error(`daemon not running (no socket at ${socketPath()})`);
   try {
-    return (await conn.request(msg, 15_000)) as ResultMessage;
+    return await conn.request(type, body, 15_000);
   } finally {
     conn.close();
   }
@@ -46,13 +45,12 @@ async function open(target: string): Promise<void> {
     return;
   }
   try {
-    const msg: Message = { type: 'open', id: randomUUID(), cwd, target };
-    if (workspaceId) msg.workspaceId = workspaceId;
+    const body: RequestBody<'open'> = { cwd, target };
+    if (workspaceId) body.workspaceId = workspaceId;
     else process.stderr.write('vscode-tmux: VSCODE_TMUX_WORKSPACE_ID not set; opening in the last active window\n');
-    const reply = (await conn.request(msg, 15_000)) as ResultMessage;
-    if (!reply.ok) fail(reply.error ?? 'open failed');
-    const d = reply.data as { via: string; raised?: boolean };
-    if (d.via === 'extension' && d.raised === false) process.stderr.write('vscode-tmux: opened, but the window could not be raised\n');
+    const reply = await conn.request('open', body, 15_000);
+    if (!reply.ok) fail(reply.error);
+    if (reply.data.via === 'extension' && reply.data.raised === false) process.stderr.write('vscode-tmux: opened, but the window could not be raised\n');
   } finally {
     conn.close();
   }
@@ -62,18 +60,18 @@ async function newTab(words: string[], command: string[] | undefined): Promise<v
   const workspaceId = process.env.VSCODE_TMUX_WORKSPACE_ID;
   if (!workspaceId) fail('VSCODE_TMUX_WORKSPACE_ID not set; run this inside a vscode-tmux terminal');
   const name = words.join(' ').trim();
-  const msg: Message = { type: 'createTerminal', id: randomUUID(), workspaceId, cwd: process.cwd() };
-  if (name) msg.name = name;
-  if (command?.length) msg.command = command;
-  const reply = await request(msg);
-  if (!reply.ok) fail(reply.error ?? 'createTerminal failed');
+  const body: RequestBody<'createTerminal'> = { workspaceId, cwd: process.cwd() };
+  if (name) body.name = name;
+  if (command?.length) body.command = command;
+  const reply = await request('createTerminal', body);
+  if (!reply.ok) fail(reply.error);
 }
 
 async function show(path: string | undefined): Promise<void> {
   const workspaceId = path ? await computeWorkspaceId(resolve(path)) : (process.env.VSCODE_TMUX_WORKSPACE_ID ?? (await computeWorkspaceId(process.cwd())));
-  const reply = await request({ type: 'showSession', id: randomUUID(), workspaceId });
-  if (!reply.ok) fail(reply.error ?? 'showSession failed');
-  process.stdout.write(`showing ${(reply.data as { sessionName: string }).sessionName}\n`);
+  const reply = await request('showSession', { workspaceId });
+  if (!reply.ok) fail(reply.error);
+  process.stdout.write(`showing ${reply.data.sessionName}\n`);
 }
 
 interface ClickOptions {
@@ -98,10 +96,10 @@ async function click(o: ClickOptions): Promise<void> {
   const target = parseClickTarget(o.word ?? '', o.link ?? '', cwd);
   if (!target) return;
 
-  const msg: Message = { type: 'open', id: randomUUID(), cwd, target: gotoArg(target) };
-  if (o.session) msg.sessionName = o.session;
-  const reply = await request(msg);
-  if (!reply.ok) fail(reply.error ?? 'open failed');
+  const body: RequestBody<'open'> = { cwd, target: gotoArg(target) };
+  if (o.session) body.sessionName = o.session;
+  const reply = await request('open', body);
+  if (!reply.ok) fail(reply.error);
   // The dropdown covers the editor it just raised, so get out of the way.
   if (!o.keep) await toggleQuake(realExec, GHOSTTY_CLASS).catch(() => undefined);
 }
@@ -159,9 +157,9 @@ async function height(): Promise<void> {
 }
 
 async function list(): Promise<void> {
-  const reply = await request({ type: 'list', id: randomUUID() });
-  if (!reply.ok) fail(reply.error ?? 'list failed');
-  const data = reply.data as { workspaces: { workspaceId: string; name: string; folder: string; sessionName: string; connected: boolean; tabs: { index: number; name: string; active: boolean; cwd: string; command: string }[] }[] };
+  const reply = await request('list', {});
+  if (!reply.ok) fail(reply.error);
+  const data = reply.data;
   if (data.workspaces.length === 0) {
     process.stdout.write('no workspaces\n');
     return;
@@ -179,10 +177,11 @@ async function status(): Promise<void> {
     process.exit(1);
   }
   conn.close();
-  const reply = await request({ type: 'status', id: randomUUID() });
+  const reply = await request('status', {});
+  if (!reply.ok) fail(reply.error);
   const unit = await unitState();
   const shortcut = await findQuakeShortcut(realExec, GHOSTTY_CLASS);
-  const data = { ...(reply.data as object), ghostty: { unit: `${GHOSTTY_UNIT}: ${unit}`, globalShortcut: shortcut?.action ?? 'not registered' } };
+  const data = { ...reply.data, ghostty: { unit: `${GHOSTTY_UNIT}: ${unit}`, globalShortcut: shortcut?.action ?? 'not registered' } };
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
 }
 

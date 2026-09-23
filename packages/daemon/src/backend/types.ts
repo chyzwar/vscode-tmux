@@ -1,23 +1,4 @@
-/** A terminal tab inside a workspace session (a tmux window). */
-export interface Tab {
-  /** Backend-stable id for the life of the server (tmux `@N`). */
-  id: string;
-  index: number;
-  name: string;
-  cwd: string;
-  active: boolean;
-  /** Foreground command of the active pane. */
-  command: string;
-}
-
-/** An attached client of the backend (a tmux client). */
-export interface Client {
-  tty: string;
-  termname: string;
-  control: boolean;
-  session: string;
-  pid: number;
-}
+import type { Client, Tab } from '@vscode-tmux/protocol';
 
 export interface CreateSessionOptions {
   name: string;

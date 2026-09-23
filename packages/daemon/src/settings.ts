@@ -1,9 +1,15 @@
 import { readFileSync } from 'node:fs';
-import { isQuickTerminalSize } from './dropdown.js';
+import * as z from 'zod';
 
-export type GdkBackend = 'auto' | 'x11' | 'wayland' | 'default';
+/** Ghostty's `quick-terminal-size` syntax: `NN%` or `NNpx`, optionally `,` and a second value for the other axis. */
+export const QuickTerminalSize = z.string().regex(/^\d+(px|%)(,\d+(px|%))?$/);
+export const isQuickTerminalSize = (v: unknown): v is string => QuickTerminalSize.safeParse(v).success;
 
-export interface Settings {
+/**
+ * `<configDir>/config.json`. A missing field takes its default; an invalid one
+ * is an error (see `loadSettings`). Unknown keys are ignored.
+ */
+export const Settings = z.object({
   /**
    * GDK backend for the companion Ghostty instance.
    * `auto` (default): `x11` on GNOME, untouched elsewhere (so native Wayland under KWin and other
@@ -13,41 +19,45 @@ export interface Settings {
    * creates its terminal surface when it runs natively on Wayland (see docs/e2e.md).
    * `wayland`: force native Wayland. `default`: never set GDK_BACKEND.
    */
-  ghosttyGdkBackend: GdkBackend;
+  ghosttyGdkBackend: z.enum(['auto', 'x11', 'wayland', 'default']).default('auto'),
   /** Milliseconds to wait for Ghostty to attach its tmux client after launch. */
-  ghosttyStartTimeoutMs: number;
+  ghosttyStartTimeoutMs: z.number().positive().default(8000),
   /**
-   * The two `quick-terminal-size` values `vscode-tmux height` (F11) flips between. Ghostty's
-   * own syntax: `NN%` or `NNpx`, optionally `,` and a second value for the other axis.
+   * The two `quick-terminal-size` values `vscode-tmux height` (F11) flips between.
    * The full height is pixels rather than 100% because Ghostty sizes the dropdown from the whole
    * monitor and sets no layer-shell exclusive zone, so 100% under a top Plasma panel pushes the
    * bottom of the terminal off screen. 1048 = 1080 minus a 32px panel; adjust to the screen.
    */
-  ghosttyDropdownFull: string;
-  ghosttyDropdownShort: string;
-}
+  ghosttyDropdownFull: QuickTerminalSize.default('1048px'),
+  ghosttyDropdownShort: QuickTerminalSize.default('45%'),
+});
+export type Settings = z.infer<typeof Settings>;
+export type GdkBackend = Settings['ghosttyGdkBackend'];
 
-export const DEFAULT_SETTINGS: Settings = { ghosttyGdkBackend: 'auto', ghosttyStartTimeoutMs: 8000, ghosttyDropdownFull: '1048px', ghosttyDropdownShort: '45%' };
+export const DEFAULT_SETTINGS: Settings = Settings.parse({});
 
-const BACKENDS: ReadonlySet<string> = new Set<GdkBackend>(['auto', 'x11', 'wayland', 'default']);
-
-/** Read `<configDir>/config.json`; missing file or unknown keys are fine, bad values fall back to defaults. */
+/**
+ * Read `<configDir>/config.json`. No file means the defaults. Anything else that
+ * is wrong (unreadable, not JSON, not an object, a bad value) throws, naming the
+ * file and the field: a typo in the config must not be silently ignored.
+ */
 export function loadSettings(file: string): Settings {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_SETTINGS };
+    throw new Error(`cannot read ${file}: ${(err as Error).message}`);
+  }
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
-  } catch {
-    return { ...DEFAULT_SETTINGS };
+    raw = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${file} is not valid JSON: ${(err as Error).message}`);
   }
-  const s = { ...DEFAULT_SETTINGS };
-  if (typeof raw === 'object' && raw !== null) {
-    const r = raw as Record<string, unknown>;
-    if (typeof r.ghosttyGdkBackend === 'string' && BACKENDS.has(r.ghosttyGdkBackend)) s.ghosttyGdkBackend = r.ghosttyGdkBackend as GdkBackend;
-    if (typeof r.ghosttyStartTimeoutMs === 'number' && r.ghosttyStartTimeoutMs > 0) s.ghosttyStartTimeoutMs = r.ghosttyStartTimeoutMs;
-    if (isQuickTerminalSize(r.ghosttyDropdownFull)) s.ghosttyDropdownFull = r.ghosttyDropdownFull;
-    if (isQuickTerminalSize(r.ghosttyDropdownShort)) s.ghosttyDropdownShort = r.ghosttyDropdownShort;
-  }
-  return s;
+  const r = Settings.safeParse(raw);
+  if (!r.success) throw new Error(`invalid settings in ${file}:\n${z.prettifyError(r.error)}`);
+  return r.data;
 }
 
 /** `XDG_CURRENT_DESKTOP` is a colon-separated list, e.g. `ubuntu:GNOME`. */

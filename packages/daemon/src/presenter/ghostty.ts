@@ -1,4 +1,5 @@
-import type { Client, SessionBackend } from '../backend/types.js';
+import type { Client } from '@vscode-tmux/protocol';
+import type { SessionBackend } from '../backend/types.js';
 import type { Log } from '../log.js';
 import type { GhosttyRunner } from './runner.js';
 import type { Presenter } from './types.js';

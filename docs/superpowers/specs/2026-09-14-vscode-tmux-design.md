@@ -60,7 +60,7 @@ Extension → daemon:
 - `createTerminal {workspaceId, name?, cwd?, command?}` → `result`
 - `showSession {workspaceId}` → `result` (ensures Ghostty visible + switch)
 Daemon → extension:
-- `open {id, path, line?, col?}` → extension replies `openResult {id, ok, title}` where `title` is the predicted OS window title (`${dirty}${activeEditorShort} - ${rootName} - Visual Studio Code`, computed from the `window.title` template after the editor is shown)
+- `open {id, path, line?, col?}` → extension replies `result {id, ok, data: {title}}` (was `openResult` until the zod protocol schemas; `result` is the only reply type now) where `title` is the predicted OS window title (`${dirty}${activeEditorShort} - ${rootName} - Visual Studio Code`, computed from the `window.title` template after the editor is shown)
 CLI → daemon:
 - `open {workspaceId?, cwd, target}` → `result {ok, via: 'extension'|'code-cli'}`
 - `list` / `status` → `result {...}`

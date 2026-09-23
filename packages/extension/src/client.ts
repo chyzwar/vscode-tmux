@@ -1,18 +1,20 @@
-import { randomUUID } from 'node:crypto';
 import { createConnection, type Socket } from 'node:net';
-import { NdjsonDecoder, encode, type Message } from '@vscode-tmux/protocol';
-
-type Pending = { resolve: (m: Message) => void; reject: (e: Error) => void; timer: NodeJS.Timeout };
+import { NdjsonDecoder, PendingRequests, encode, type DaemonRequestType, type Message, type Reply, type RequestBody, type ResultMessage, type ResultOf } from '@vscode-tmux/protocol';
 
 /** NDJSON client for the daemon socket, used by the extension host. */
 export class DaemonClient {
   private socket: Socket | undefined;
-  private readonly decoder = new NdjsonDecoder();
-  private readonly pending = new Map<string, Pending>();
-  private requestHandler: ((m: Message) => Promise<Message>) | undefined;
+  private readonly decoder: NdjsonDecoder;
+  private readonly rpc = new PendingRequests((m) => this.send(m));
+  private requestHandler: ((m: Message) => Promise<ResultMessage>) | undefined;
   private disconnectHandler: (() => void) | undefined;
 
-  constructor(private readonly socketPath: string) {}
+  constructor(
+    private readonly socketPath: string,
+    log?: (line: string) => void,
+  ) {
+    this.decoder = new NdjsonDecoder(log && ((line, reason) => log(`dropped message: ${reason} (${line.slice(0, 200)})`)));
+  }
 
   get connected(): boolean {
     return this.socket !== undefined && !this.socket.destroyed;
@@ -41,17 +43,14 @@ export class DaemonClient {
       });
       socket.on('close', () => {
         if (this.socket === socket) this.socket = undefined;
-        for (const p of this.pending.values()) {
-          clearTimeout(p.timer);
-          p.reject(new Error('daemon connection closed'));
-        }
-        this.pending.clear();
+        this.rpc.rejectAll('daemon connection closed');
         this.disconnectHandler?.();
       });
     });
   }
 
-  onRequest(handler: (m: Message) => Promise<Message>): void {
+  /** Requests the daemon sends us (`openRequest`, `windowStateRequest`); the handler's reply goes straight back. */
+  onRequest(handler: (m: Message) => Promise<ResultMessage>): void {
     this.requestHandler = handler;
   }
 
@@ -63,18 +62,9 @@ export class DaemonClient {
     if (this.socket && !this.socket.destroyed) this.socket.write(encode(msg));
   }
 
-  request(msg: Message, timeoutMs = 15_000): Promise<Message> {
-    const id = (msg as { id?: string }).id ?? randomUUID();
-    const withId = { ...msg, id } as Message;
-    return new Promise((resolve, reject) => {
-      if (!this.connected) return reject(new Error('not connected to daemon'));
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`timeout waiting for ${msg.type} reply`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      this.send(withId);
-    });
+  request<T extends DaemonRequestType>(type: T, body: RequestBody<T>, timeoutMs = 15_000): Promise<Reply<ResultOf<T>>> {
+    if (!this.connected) return Promise.reject(new Error('not connected to daemon'));
+    return this.rpc.request(type, body, timeoutMs);
   }
 
   close(): void {
@@ -83,17 +73,8 @@ export class DaemonClient {
   }
 
   private async dispatch(msg: Message): Promise<void> {
-    const id = (msg as { id?: string }).id;
-    if (msg.type === 'result' && id && this.pending.has(id)) {
-      const p = this.pending.get(id)!;
-      this.pending.delete(id);
-      clearTimeout(p.timer);
-      p.resolve(msg);
-      return;
-    }
-    if (this.requestHandler) {
-      const reply = await this.requestHandler(msg);
-      this.send(reply);
-    }
+    if (this.rpc.settle(msg)) return;
+    if (msg.type === 'result') return; // a reply to a request we gave up on
+    if (this.requestHandler) this.send(await this.requestHandler(msg));
   }
 }

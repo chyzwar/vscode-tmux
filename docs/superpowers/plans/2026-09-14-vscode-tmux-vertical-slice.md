@@ -18,7 +18,7 @@
 - Socket path: `/run/user/<uid>/vscode-tmux.sock`. State dir: `~/.local/state/vscode-tmux/`.
 - Session name: `<slug>-<workspaceId[0:8]>`; targets always use `=` exact prefix.
 - Session env: `VSCODE_TMUX_WORKSPACE_ID`, `VSCODE_TMUX_WORKSPACE`, `VSCODE_TMUX_SOCKET`.
-- Protocol: newline-delimited JSON; every request carries `id`; responses are `result`/`openResult` with the same `id`.
+- Protocol: newline-delimited JSON; every request carries `id`; responses are `result` with the same `id` (historical note: `openResult` existed until the zod schemas in `packages/protocol/src/messages.ts` made `result {data:{title}}` the reply to `openRequest`).
 - Commands exposed by the extension: `VS Code Tmux: Create Terminal`, `VS Code Tmux: Show Session`.
 - Every external process call goes through an injectable `Exec` so unit tests never spawn tmux/ghostty/xdotool.
 

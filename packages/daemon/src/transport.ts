@@ -1,30 +1,29 @@
-import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { createServer, createConnection, type Server, type Socket } from 'node:net';
-import { NdjsonDecoder, encode, type Message } from '@vscode-tmux/protocol';
+import { NdjsonDecoder, PendingRequests, encode, type Message, type Reply, type RequestBody, type RequestType, type ResultOf } from '@vscode-tmux/protocol';
 import type { Connection } from './registry.js';
 
+export type Log = (line: string) => void;
+
 /**
- * One NDJSON peer over a socket. Supports fire-and-forget `send`, and
- * `request` which resolves when a message with the same `id` comes back.
+ * One NDJSON peer over a socket. Supports fire-and-forget `send`, and typed
+ * `request`s that resolve when the `result` with the same `id` comes back.
  */
 export class SocketConnection implements Connection {
-  private readonly decoder = new NdjsonDecoder();
-  private readonly pending = new Map<string, { resolve: (m: Message) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+  private readonly decoder: NdjsonDecoder;
+  private readonly rpc = new PendingRequests((m) => this.send(m));
   private handler: ((m: Message) => void) | undefined;
 
-  constructor(readonly socket: Socket) {
+  constructor(
+    readonly socket: Socket,
+    log?: Log,
+  ) {
+    this.decoder = new NdjsonDecoder(log && ((line, reason) => log(`dropped message: ${reason} (${line.slice(0, 200)})`)));
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
-      for (const msg of this.decoder.push(chunk)) this.dispatch(msg);
+      for (const msg of this.decoder.push(chunk)) if (!this.rpc.settle(msg)) this.handler?.(msg);
     });
-    socket.on('close', () => {
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error('connection closed'));
-      }
-      this.pending.clear();
-    });
+    socket.on('close', () => this.rpc.rejectAll('connection closed'));
     socket.on('error', () => {
       /* surfaced through close */
     });
@@ -38,34 +37,12 @@ export class SocketConnection implements Connection {
     if (!this.socket.destroyed) this.socket.write(encode(msg));
   }
 
-  request(msg: Message, timeoutMs = 10_000): Promise<Message> {
-    const id = (msg as { id?: string }).id ?? randomUUID();
-    const withId = { ...msg, id } as Message;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`timeout waiting for reply to ${msg.type}`));
-      }, timeoutMs);
-      timer.unref();
-      this.pending.set(id, { resolve, reject, timer });
-      this.send(withId);
-    });
+  request<T extends RequestType>(type: T, body: RequestBody<T>, timeoutMs = 10_000): Promise<Reply<ResultOf<T>>> {
+    return this.rpc.request(type, body, timeoutMs);
   }
 
   close(): void {
     this.socket.end();
-  }
-
-  private dispatch(msg: Message): void {
-    const id = (msg as { id?: string }).id;
-    if ((msg.type === 'result' || msg.type === 'openResult') && id && this.pending.has(id)) {
-      const p = this.pending.get(id)!;
-      this.pending.delete(id);
-      clearTimeout(p.timer);
-      p.resolve(msg);
-      return;
-    }
-    this.handler?.(msg);
   }
 }
 
@@ -100,6 +77,8 @@ export interface ListenOptions {
    */
   onPathLost?: () => void;
   watchIntervalMs?: number;
+  /** Receives one line per message the decoder drops. */
+  log?: Log;
 }
 
 /** True while the socket file at `socketPath` is still the one we bound (same inode). */
@@ -134,7 +113,7 @@ export async function listen(o: ListenOptions): Promise<Server> {
       }
     }
     const server = createServer((socket) => {
-      const conn = new SocketConnection(socket);
+      const conn = new SocketConnection(socket, o.log);
       o.onConnection(conn);
       socket.on('close', () => o.onDisconnect(conn));
     });

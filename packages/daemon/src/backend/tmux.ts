@@ -1,5 +1,6 @@
 import type { Exec } from '../exec.js';
-import type { Client, CreateSessionOptions, NewTabOptions, SessionBackend, Tab } from './types.js';
+import type { Client, Tab } from '@vscode-tmux/protocol';
+import type { CreateSessionOptions, NewTabOptions, SessionBackend } from './types.js';
 
 export interface TmuxBackendOptions {
   exec: Exec;

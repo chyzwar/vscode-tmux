@@ -1,8 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
-import type { Message, OpenRequestMessage, ResultMessage } from '@vscode-tmux/protocol';
+import { errorResult, okResult, type DaemonRequestType, type Message, type OpenRequestMessage, type Reply, type RequestBody, type ResultMessage, type ResultOf } from '@vscode-tmux/protocol';
 import * as vscode from 'vscode';
 import { DaemonClient } from './client.js';
 import { identityFromStorageUri, type WorkspaceIdentity } from './identity.js';
@@ -76,15 +75,15 @@ class Session {
   async createTerminal(): Promise<void> {
     const name = await vscode.window.showInputBox({ prompt: 'Terminal tab name', placeHolder: 'Claude, Server, Tests', ignoreFocusOut: true });
     if (name === undefined) return;
-    const msg: Message = { type: 'createTerminal', id: randomUUID(), workspaceId: this.identity.workspaceId };
-    if (name.trim()) msg.name = name.trim();
-    const reply = await this.request(msg);
-    if (!reply?.ok) void vscode.window.showErrorMessage(`VS Code Tmux: ${reply?.error ?? 'could not create terminal'}`);
+    const body: RequestBody<'createTerminal'> = { workspaceId: this.identity.workspaceId };
+    if (name.trim()) body.name = name.trim();
+    const reply = await this.request('createTerminal', body);
+    if (!reply.ok) void vscode.window.showErrorMessage(`VS Code Tmux: ${reply.error}`);
   }
 
   async showSession(): Promise<void> {
-    const reply = await this.request({ type: 'showSession', id: randomUUID(), workspaceId: this.identity.workspaceId });
-    if (!reply?.ok) void vscode.window.showErrorMessage(`VS Code Tmux: ${reply?.error ?? 'could not show session'}`);
+    const reply = await this.request('showSession', { workspaceId: this.identity.workspaceId });
+    if (!reply.ok) void vscode.window.showErrorMessage(`VS Code Tmux: ${reply.error}`);
   }
 
   private send(msg: Message): void {
@@ -95,17 +94,18 @@ class Session {
     this.client.send(msg);
   }
 
-  private async request(msg: Message): Promise<ResultMessage | undefined> {
+  /** A typed request to the daemon; transport failures come back as `{ ok: false }` so callers have one path. */
+  private async request<T extends DaemonRequestType>(type: T, body: RequestBody<T>): Promise<Reply<ResultOf<T>>> {
     if (!this.client?.connected) await this.connectWithSpawn();
     if (!this.client?.connected) {
       void vscode.window.showErrorMessage('VS Code Tmux: daemon is not reachable (see the VS Code Tmux output channel)');
-      return undefined;
+      return { ok: false, error: 'daemon is not reachable' };
     }
     try {
-      return (await this.client.request(msg)) as ResultMessage;
+      return await this.client.request(type, body);
     } catch (err) {
-      log(`request ${msg.type} failed: ${(err as Error).message}`);
-      return { type: 'result', id: (msg as { id: string }).id, ok: false, error: (err as Error).message };
+      log(`request ${type} failed: ${(err as Error).message}`);
+      return { ok: false, error: (err as Error).message };
     }
   }
 
@@ -138,7 +138,7 @@ class Session {
   }
 
   private async tryConnect(): Promise<boolean> {
-    const client = new DaemonClient(SOCKET_PATH);
+    const client = new DaemonClient(SOCKET_PATH, log);
     try {
       await client.connect();
     } catch {
@@ -150,9 +150,7 @@ class Session {
       log('daemon connection closed');
       if (!this.disposed) void this.reconnect(2000);
     });
-    const hello: Message = {
-      type: 'hello',
-      id: randomUUID(),
+    const hello: RequestBody<'hello'> = {
       workspaceId: this.identity.workspaceId,
       folder: this.identity.folder,
       name: this.identity.name,
@@ -161,8 +159,8 @@ class Session {
     };
     if (this.identity.workspaceFile) hello.workspaceFile = this.identity.workspaceFile;
     if (process.env.VSCODE_PID) hello.vscodePid = Number(process.env.VSCODE_PID);
-    const reply = await client.request(hello);
-    log(`hello reply: ${JSON.stringify((reply as ResultMessage).data ?? reply)}`);
+    const reply = await client.request('hello', hello);
+    log(reply.ok ? `hello reply: ${JSON.stringify(reply.data)}` : `hello failed: ${reply.error}`);
     return true;
   }
 
@@ -177,15 +175,18 @@ class Session {
     }
   }
 
-  private async handleRequest(msg: Message): Promise<Message> {
-    if (msg.type === 'windowStateRequest') return { type: 'result', id: msg.id, ok: true, data: { focused: vscode.window.state.focused } };
-    if (msg.type !== 'openRequest') {
-      return { type: 'result', id: (msg as { id?: string }).id ?? '', ok: false, error: `unexpected ${msg.type}` };
+  private async handleRequest(msg: Message): Promise<ResultMessage> {
+    switch (msg.type) {
+      case 'windowStateRequest':
+        return okResult(msg, { focused: vscode.window.state.focused });
+      case 'openRequest':
+        return this.openFile(msg);
+      default:
+        return errorResult('id' in msg ? msg.id : '', `unexpected ${msg.type}`);
     }
-    return this.openFile(msg);
   }
 
-  private async openFile(req: OpenRequestMessage): Promise<Message> {
+  private async openFile(req: OpenRequestMessage): Promise<ResultMessage> {
     try {
       const uri = vscode.Uri.file(req.path);
       const stat = await vscode.workspace.fs.stat(uri);
@@ -205,10 +206,10 @@ class Session {
       }
       const title = this.predictWindowTitle(editorShort);
       log(`opened ${req.path}${req.line ? ':' + req.line : ''}; predicted title ${JSON.stringify(title)}`);
-      return { type: 'openResult', id: req.id, ok: true, title };
+      return okResult(req, { title });
     } catch (err) {
       log(`open failed: ${(err as Error).message}`);
-      return { type: 'openResult', id: req.id, ok: false, error: (err as Error).message };
+      return errorResult(req.id, (err as Error).message);
     }
   }
 

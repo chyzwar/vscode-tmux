@@ -3,7 +3,6 @@ import { fakeExec } from './fakeExec.js';
 import {
   appObjectPath,
   currentQuickTerminalSize,
-  isQuickTerminalSize,
   parseBusName,
   parseWindowPaths,
   toggleDropdownHeight,
@@ -58,10 +57,6 @@ describe('parseWindowPaths', () => {
 });
 
 describe('quick-terminal-size in the config', () => {
-  it('accepts Ghostty size syntax only', () => {
-    for (const ok of ['45%', '1048px', '100%,100%', '50%,500px']) expect(isQuickTerminalSize(ok)).toBe(true);
-    for (const bad of ['45', 'full', '', '45%,', 4, undefined]) expect(isQuickTerminalSize(bad)).toBe(false);
-  });
   it('replaces the existing line in place and leaves the rest alone', () => {
     const conf = '# dropdown\nquick-terminal-position = top\nquick-terminal-size = 45%\nquick-terminal-autohide = false\n';
     expect(withQuickTerminalSize(conf, '1048px')).toBe(conf.replace('45%', '1048px'));

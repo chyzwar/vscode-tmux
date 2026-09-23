@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Client, SessionBackend, Tab } from '../src/backend/types.js';
+import type { Client, Tab } from '@vscode-tmux/protocol';
+import type { SessionBackend } from '../src/backend/types.js';
 import { GhosttyPresenter, pickClient } from '../src/presenter/ghostty.js';
 import type { GhosttyRunner } from '../src/presenter/runner.js';
 

@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import type { Message, OpenResultMessage, ResultMessage } from '@vscode-tmux/protocol';
+import type { OpenOutcome, RequestBody } from '@vscode-tmux/protocol';
 import type { Exec } from './exec.js';
 import type { WindowRaiser } from './raise/types.js';
 import type { Connection, Registry } from './registry.js';
@@ -20,12 +19,6 @@ export interface OpenInput {
   workspaceId?: string;
   cwd: string;
   target: string;
-}
-
-export interface OpenOutcome {
-  via: 'extension' | 'code-cli' | 'code-cli-fallback';
-  title?: string;
-  raised?: boolean;
 }
 
 const gotoArg = (t: Target): string => t.path + (t.line !== undefined ? `:${t.line}` + (t.col !== undefined ? `:${t.col}` : '') : '');
@@ -60,16 +53,16 @@ export class Opener {
       return { via: 'code-cli' };
     }
 
-    const req: Message = { type: 'openRequest', id: randomUUID(), path: target.path };
-    if (target.line !== undefined) req.line = target.line;
-    if (target.col !== undefined) req.col = target.col;
-    const reply = (await conn.request(req, 10_000)) as OpenResultMessage;
-    if (!reply.ok) throw new Error(reply.error ?? 'extension failed to open the file');
+    const body: RequestBody<'openRequest'> = { path: target.path };
+    if (target.line !== undefined) body.line = target.line;
+    if (target.col !== undefined) body.col = target.col;
+    const reply = await conn.request('openRequest', body, 10_000);
+    if (!reply.ok) throw new Error(reply.error);
 
-    const raised = await this.raise(reply.title, workspacePath, target, record.name, conn);
+    const raised = await this.raise(reply.data.title, workspacePath, target, record.name, conn);
     this.log(`opened ${gotoArg(target)} in ${record.name} via extension; raised=${raised}`);
     const out: OpenOutcome = { via: 'extension', raised };
-    if (reply.title !== undefined) out.title = reply.title;
+    if (reply.data.title !== undefined) out.title = reply.data.title;
     return out;
   }
 
@@ -86,8 +79,8 @@ export class Opener {
   /** Ask the window's extension host whether the window has OS focus now. */
   private async isFocused(conn: Connection): Promise<boolean> {
     try {
-      const reply = (await conn.request({ type: 'windowStateRequest', id: randomUUID() }, 2000)) as ResultMessage;
-      return reply.ok && (reply.data as { focused?: unknown } | undefined)?.focused === true;
+      const reply = await conn.request('windowStateRequest', {}, 2000);
+      return reply.ok && reply.data.focused;
     } catch {
       return false;
     }
