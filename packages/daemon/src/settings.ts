@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isQuickTerminalSize } from './dropdown.js';
 
 export type GdkBackend = 'auto' | 'x11' | 'wayland' | 'default';
 
@@ -15,9 +16,18 @@ export interface Settings {
   ghosttyGdkBackend: GdkBackend;
   /** Milliseconds to wait for Ghostty to attach its tmux client after launch. */
   ghosttyStartTimeoutMs: number;
+  /**
+   * The two `quick-terminal-size` values `vscode-tmux height` (F11) flips between. Ghostty's
+   * own syntax: `NN%` or `NNpx`, optionally `,` and a second value for the other axis.
+   * The full height is pixels rather than 100% because Ghostty sizes the dropdown from the whole
+   * monitor and sets no layer-shell exclusive zone, so 100% under a top Plasma panel pushes the
+   * bottom of the terminal off screen. 1048 = 1080 minus a 32px panel; adjust to the screen.
+   */
+  ghosttyDropdownFull: string;
+  ghosttyDropdownShort: string;
 }
 
-export const DEFAULT_SETTINGS: Settings = { ghosttyGdkBackend: 'auto', ghosttyStartTimeoutMs: 8000 };
+export const DEFAULT_SETTINGS: Settings = { ghosttyGdkBackend: 'auto', ghosttyStartTimeoutMs: 8000, ghosttyDropdownFull: '1048px', ghosttyDropdownShort: '45%' };
 
 const BACKENDS: ReadonlySet<string> = new Set<GdkBackend>(['auto', 'x11', 'wayland', 'default']);
 
@@ -34,6 +44,8 @@ export function loadSettings(file: string): Settings {
     const r = raw as Record<string, unknown>;
     if (typeof r.ghosttyGdkBackend === 'string' && BACKENDS.has(r.ghosttyGdkBackend)) s.ghosttyGdkBackend = r.ghosttyGdkBackend as GdkBackend;
     if (typeof r.ghosttyStartTimeoutMs === 'number' && r.ghosttyStartTimeoutMs > 0) s.ghosttyStartTimeoutMs = r.ghosttyStartTimeoutMs;
+    if (isQuickTerminalSize(r.ghosttyDropdownFull)) s.ghosttyDropdownFull = r.ghosttyDropdownFull;
+    if (isQuickTerminalSize(r.ghosttyDropdownShort)) s.ghosttyDropdownShort = r.ghosttyDropdownShort;
   }
   return s;
 }

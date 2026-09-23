@@ -143,8 +143,6 @@ for f in tmux.conf ghostty.conf; do
     log "kept existing ~/.config/vscode-tmux/$f (use --force-config to overwrite)"
   fi
 done
-install -m 0755 "$REPO/config/quick-terminal-height.sh" "$HOME/.config/vscode-tmux/quick-terminal-height.sh"
-log "installed ~/.config/vscode-tmux/quick-terminal-height.sh (F11 height toggle)"
 # A running tmux server keeps the config it started with, so re-apply options and
 # key bindings (the mouse click-to-open bindings live there) without killing it.
 if tmux -L vscode-tmux has-session 2>/dev/null; then

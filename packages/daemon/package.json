@@ -9,6 +9,7 @@
     "dev": "bun run src/main.ts daemon --foreground"
   },
   "dependencies": {
-    "@vscode-tmux/protocol": "workspace:*"
+    "@vscode-tmux/protocol": "workspace:*",
+    "commander": "^15.0.0"
   }
 }
