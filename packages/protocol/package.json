@@ -10,5 +10,6 @@
   },
   "dependencies": {
     "zod": "^4.6.5"
-  }
+  },
+  "license": "MIT"
 }

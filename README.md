@@ -97,3 +97,7 @@ bun run build      # extension via esbuild; daemon via `bun build --compile` -> 
 The daemon source uses only `node:` APIs — no Bun-specific ones — so it runs unchanged on either runtime; the toolchain (`bun --bun x vitest|tsc|vsce`) and the shipped binary both run on Bun. `VSCODE_TMUX_SOCKET` overrides the socket path (tests use it for isolation).
 
 Layout: `packages/protocol` (messages, NDJSON codec, env scrubbing), `packages/daemon` (backend, presenter, opener, `raise/` window raisers, server, CLI), `packages/extension` (VS Code extension), `config/` (tmux and Ghostty instance configs), `docs/` (ADR, research, plans).
+
+## License
+
+MIT, see `LICENSE`.
